@@ -1,0 +1,14 @@
+#include <stdint.h>
+#include <hotc/utilities/git_revision.hpp>
+
+#define HOTC_GIT_REVISION_SHA "@HOTC_GIT_REVISION_SHA@"
+#define HOTC_GIT_REVISION_UNIX_TIMESTAMP @HOTC_GIT_REVISION_UNIX_TIMESTAMP@
+#define HOTC_GIT_REVISION_DESCRIPTION "@HOTC_GIT_REVISION_DESCRIPTION@"
+
+namespace hotc { namespace utilities {
+
+const char* const git_revision_sha = HOTC_GIT_REVISION_SHA;
+const uint32_t git_revision_unix_timestamp = HOTC_GIT_REVISION_UNIX_TIMESTAMP;
+const char* const git_revision_description = HOTC_GIT_REVISION_DESCRIPTION;
+
+} } // end namespace hotc::utilities
