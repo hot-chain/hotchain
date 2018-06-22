@@ -32,8 +32,6 @@ namespace hotc { namespace chain {
    struct chain_parameters
    {
       uint8_t                 block_interval                      = HOTC_DEFAULT_BLOCK_INTERVAL; ///< interval in seconds between blocks
-      uint32_t                maintenance_interval                = HOTC_DEFAULT_MAINTENANCE_INTERVAL; ///< interval in sections between blockchain maintenance events
-      uint8_t                 maintenance_skip_slots              = HOTC_DEFAULT_MAINTENANCE_SKIP_SLOTS; ///< number of block_intervals to skip at maintenance time
       uint32_t                maximum_transaction_size            = HOTC_DEFAULT_MAX_TRANSACTION_SIZE; ///< maximum allowable size in bytes for a transaction
       uint32_t                maximum_block_size                  = HOTC_DEFAULT_MAX_BLOCK_SIZE; ///< maximum allowable size in bytes for a block
       uint32_t                maximum_time_until_expiration       = HOTC_DEFAULT_MAX_TIME_UNTIL_EXPIRATION; ///< maximum lifetime in seconds for transactions to be valid, before expiring
@@ -47,8 +45,6 @@ namespace hotc { namespace chain {
 
 FC_REFLECT( hotc::chain::chain_parameters,
             (block_interval)
-            (maintenance_interval)
-            (maintenance_skip_slots)
             (maximum_transaction_size)
             (maximum_block_size)
             (maximum_time_until_expiration)
