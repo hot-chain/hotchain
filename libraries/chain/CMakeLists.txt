@@ -2,29 +2,9 @@
 file(GLOB HEADERS "include/hotc/chain/*.hpp")
 file(GLOB PROTOCOL_HEADERS "include/hotc/chain/protocol/*.hpp")
 
-if( HOTC_DISABLE_UNITY_BUILD )
-   set( HOTC_DB_FILES
-        db_block.cpp
-        db_debug.cpp
-        db_getter.cpp
-        db_init.cpp
-        db_maint.cpp
-        db_management.cpp
-        db_update.cpp
-        db_producer_schedule.cpp
-      )
-   message( STATUS "Hotc database unity build disabled" )
-else( HOTC_DISABLE_UNITY_BUILD )
-   set( HOTC_DB_FILES
-        database.cpp )
-   message( STATUS "Hotc database unity build enabled" )
-endif( HOTC_DISABLE_UNITY_BUILD )
-
 ## SORT .cpp by most likely to change / break compile
 add_library( hotc_chain
-
-             # As database takes the longest to compile, start it first
-             ${HOTC_DB_FILES}
+             database.cpp
              fork_database.cpp
 
              protocol/types.cpp
