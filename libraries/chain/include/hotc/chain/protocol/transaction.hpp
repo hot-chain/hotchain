@@ -22,8 +22,8 @@
  * THE SOFTWARE.
  */
 #pragma once
-#include <hotc/chain/protocol/operations.hpp>
 #include <hotc/chain/protocol/types.hpp>
+#include <hotc/chain/message.hpp>
 
 #include <numeric>
 
@@ -82,7 +82,8 @@ namespace hotc { namespace chain {
        */
       fc::time_point_sec expiration;
 
-      vector<operation>  operations;
+      /// The messages in this transaction
+      vector<message> messages;
 
       /// Calculate the digest for a transaction
       digest_type         digest()const;
@@ -113,8 +114,8 @@ namespace hotc { namespace chain {
 
       vector<signature_type> signatures;
 
-      /// Removes all operations and signatures
-      void clear() { operations.clear(); signatures.clear(); }
+      /// Removes all messages and signatures
+      void clear() { messages.clear(); signatures.clear(); }
 
       digest_type merkle_digest()const;
    };
@@ -123,5 +124,5 @@ namespace hotc { namespace chain {
 
 } } // hotc::chain
 
-FC_REFLECT( hotc::chain::transaction, (ref_block_num)(ref_block_prefix)(expiration)(operations) )
+FC_REFLECT( hotc::chain::transaction, (ref_block_num)(ref_block_prefix)(expiration)(messages) )
 FC_REFLECT_DERIVED( hotc::chain::signed_transaction, (hotc::chain::transaction), (signatures) )

@@ -90,8 +90,11 @@ namespace hotc { namespace chain {
    using chainbase::allocator;
    using shared_string = boost::interprocess::basic_string<char, std::char_traits<char>, allocator<char>>;
 
-   typedef fc::ecc::private_key        private_key_type;
-   typedef fc::sha256 chain_id_type;
+   using private_key_type = fc::ecc::private_key;
+   using chain_id_type = fc::sha256;
+
+   using account = std::string;
+   using message_type = std::string;
 
    /**
     *  List all object types from all namespaces here so they can
@@ -107,7 +110,6 @@ namespace hotc { namespace chain {
       global_property_object_type,
       dynamic_global_property_object_type,
       block_summary_object_type,
-      operation_history_object_type,
       transaction_object_type,
       producer_object_type,
       chain_property_object_type,
@@ -116,7 +118,6 @@ namespace hotc { namespace chain {
 
    class account_object;
    class producer_object;
-   class operation_history_object;
 
    using account_id_type = chainbase::oid<account_object>;
    using producer_id_type = chainbase::oid<producer_object>;
@@ -220,8 +221,13 @@ FC_REFLECT(hotc::chain::producer_id_type, (_id))
 
 FC_REFLECT_ENUM( hotc::chain::object_type,
                  (null_object_type)
+                 (account_object_type)
                  (global_property_object_type)
                  (dynamic_global_property_object_type)
+                 (block_summary_object_type)
+                 (transaction_object_type)
+                 (producer_object_type)
+                 (chain_property_object_type)
                  (OBJECT_TYPE_COUNT)
                )
 FC_REFLECT( hotc::chain::void_t, )
