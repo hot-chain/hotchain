@@ -54,7 +54,7 @@ static const char generated_file_banner[] =
 "// Warning: This is a generated file, any changes made here will be //\n"
 "// overwritten by the build process.  If you need to change what    //\n"
 "// is generated here, you should use the CMake variable             //\n"
-"// HOTC_EGENESIS_JSON to specify an embedded genesis state.     //\n"
+"// hotc_EGENESIS_JSON to specify an embedded genesis state.     //\n"
 "//                                                                  //\n"
 ;
 
@@ -203,8 +203,6 @@ void load_genesis(
       info.genesis_json = std::string();
       read_file_contents( genesis_json_filename, *info.genesis_json );
    }
-   else
-      info.genesis = hotc::app::detail::create_example_genesis();
 
    if( options.count("chain-id") )
    {
@@ -218,7 +216,7 @@ void load_genesis(
 int main( int argc, char** argv )
 {
    int main_return = 0;
-   boost::program_options::options_description cli_options("Hotc Chain Identifier");
+   boost::program_options::options_description cli_options("hotc Chain Identifier");
    cli_options.add_options()
       ("help,h", "Print this help message and exit.")
       ("genesis-json,g", boost::program_options::value<boost::filesystem::path>(), "File to read genesis state from")

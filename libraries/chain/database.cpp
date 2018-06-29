@@ -25,7 +25,6 @@
 #include <hotc/chain/database.hpp>
 #include <hotc/chain/db_with.hpp>
 #include <hotc/chain/exceptions.hpp>
-#include <hotc/chain/evaluator.hpp>
 
 #include <hotc/chain/block_summary_object.hpp>
 #include <hotc/chain/chain_property_object.hpp>
@@ -62,26 +61,35 @@ bool database::is_known_transaction( const transaction_id_type& id )const
    return trx_idx.find( id ) != trx_idx.end();
 }
 
-block_id_type  database::get_block_id_for_num( uint32_t block_num )const
+block_id_type database::get_block_id_for_num(uint32_t block_num)const
 { try {
-   return _block_id_to_block.fetch_block_id( block_num );
-} FC_CAPTURE_AND_RETHROW( (block_num) ) }
+   if (const auto& block = fetch_block_by_number(block_num))
+      return block->id();
 
-optional<signed_block> database::fetch_block_by_id( const block_id_type& id )const
+   FC_THROW_EXCEPTION(unknown_block_exception, "Could not find block");
+} FC_CAPTURE_AND_RETHROW((block_num)) }
+
+optional<signed_block> database::fetch_block_by_id(const block_id_type& id)const
 {
-   auto b = _fork_db.fetch_block( id );
-   if( !b )
-      return _block_id_to_block.fetch_optional(id);
-   return b->data;
+   auto b = _fork_db.fetch_block(id);
+   if(b) return b->data;
+   return _block_id_to_block.fetch_optional(id);
 }
 
 optional<signed_block> database::fetch_block_by_number( uint32_t num )const
 {
-   auto results = _fork_db.fetch_block_by_number(num);
-   if( results.size() == 1 )
-      return results[0]->data;
-   else
-      return _block_id_to_block.fetch_by_number(num);
+   if (const auto& block = _block_id_to_block.fetch_by_number(num))
+      return *block;
+
+   // Not in _block_id_to_block, so it must be since the last irreversible block. Grab it from _fork_db instead
+   if (num <= head_block_num()) {
+      auto block = _fork_db.head();
+      while (block && block->num > num)
+         block = block->prev.lock();
+      if (block && block->num == num)
+         return block->data;
+   }
+
    return optional<signed_block>();
 }
 
@@ -202,7 +210,6 @@ bool database::_push_block(const signed_block& new_block)
    try {
       auto session = start_undo_session(true);
       apply_block(new_block, skip);
-      _block_id_to_block.store(new_block.id(), new_block);
       session.push();
    } catch ( const fc::exception& e ) {
       elog("Failed to push new block:\n${e}", ("e", e.to_detail_string()));
@@ -222,35 +229,30 @@ bool database::_push_block(const signed_block& new_block)
  * queues full as well, it will be kept in the queue to be propagated later when a new block flushes out the pending
  * queues.
  */
-signed_transaction database::push_transaction( const signed_transaction& trx, uint32_t skip )
+void database::push_transaction(const signed_transaction& trx, uint32_t skip)
 { try {
-   signed_transaction result;
-   detail::with_skip_flags( *this, skip, [&]()
+   detail::with_skip_flags(*this, skip, [&]()
    {
-      result = _push_transaction( trx );
-   } );
-   return result;
-} FC_CAPTURE_AND_RETHROW( (trx) ) }
+      _push_transaction(trx);
+   });
+} FC_CAPTURE_AND_RETHROW((trx)) }
 
-signed_transaction database::_push_transaction( const signed_transaction& trx )
-{
+void database::_push_transaction(const signed_transaction& trx) {
    auto temp_session = start_undo_session(true);
-   auto processed_trx = _apply_transaction( trx );
-   _pending_tx.push_back(processed_trx);
+   _apply_transaction(trx);
+   _pending_tx.push_back(trx);
 
    // notify_changed_objects();
    // The transaction applied successfully. Merge its changes into the pending block session.
    temp_session.squash();
 
    // notify anyone listening to pending transactions
-   on_pending_transaction( trx );
-   return processed_trx;
+   on_pending_transaction(trx);
 }
 
-signed_transaction database::validate_transaction( const signed_transaction& trx )
-{
+void database::validate_transaction(const signed_transaction& trx) {
    auto session = start_undo_session(true);
-   return _apply_transaction( trx );
+   _apply_transaction(trx);
 }
 
 signed_block database::generate_block(
@@ -322,14 +324,12 @@ signed_block database::_generate_block(
       try
       {
          auto temp_session = start_undo_session(true);
-         signed_transaction ptx = _apply_transaction( tx );
+         _apply_transaction(tx);
          temp_session.squash();
 
-         // We have to recompute pack_size(ptx) because it may be different
-         // than pack_size(tx) (i.e. if one or more results increased
-         // their size)
-         total_block_size += fc::raw::pack_size( ptx );
-         pending_block.transactions.push_back( ptx );
+         total_block_size += fc::raw::pack_size(tx);
+//         pending_block.transactions.push_back(tx);
+#warning TODO: Populate generated blocks with transactions
       }
       catch ( const fc::exception& e )
       {
@@ -371,22 +371,17 @@ signed_block database::_generate_block(
 } FC_CAPTURE_AND_RETHROW( (producer_id) ) }
 
 /**
- * Removes the most recent block from the database and
- * undoes any changes it made.
+ * Removes the most recent block from the database and undoes any changes it made.
  */
 void database::pop_block()
 { try {
    _pending_tx_session.reset();
    auto head_id = head_block_id();
    optional<signed_block> head_block = fetch_block_by_id( head_id );
-   HOTC_ASSERT( head_block.valid(), pop_empty_chain, "there are no blocks to pop" );
+   hotc_ASSERT( head_block.valid(), pop_empty_chain, "there are no blocks to pop" );
 
    _fork_db.pop_block();
-   _block_id_to_block.remove( head_id );
    undo();
-
-   _popped_tx.insert( _popped_tx.begin(), head_block->transactions.begin(), head_block->transactions.end() );
-
 } FC_CAPTURE_AND_RETHROW() }
 
 void database::clear_pending()
@@ -418,7 +413,7 @@ void database::apply_block( const signed_block& next_block, uint32_t skip )
    return;
 }
 
-void database::_apply_block( const signed_block& next_block )
+void database::_apply_block(const signed_block& next_block)
 { try {
    uint32_t next_block_num = next_block.block_num();
    uint32_t skip = get_node_properties().skip_flags;
@@ -430,17 +425,31 @@ void database::_apply_block( const signed_block& next_block )
    _current_block_num    = next_block_num;
    _current_trx_in_block = 0;
 
-   for( const auto& trx : next_block.transactions )
-   {
-      /* We do not need to push the undo state for each transaction
-       * because they either all apply and are valid or the
-       * entire block fails to apply.  We only need an "undo" state
-       * for transactions when validating broadcast transactions or
-       * when building a block.
-       */
-      apply_transaction( trx, skip | skip_transaction_signatures );
-      ++_current_trx_in_block;
-   }
+   /* We do not need to push the undo state for each transaction
+    * because they either all apply and are valid or the
+    * entire block fails to apply.  We only need an "undo" state
+    * for transactions when validating broadcast transactions or
+    * when building a block.
+    */
+   for (const auto& cycle : next_block.cycles)
+      for (const auto& thread : cycle)
+         for(const auto& trx : thread.input_transactions)
+         {
+            struct {
+               using result_type = void;
+               void operator()(const signed_transaction& trx) {
+                  db.apply_transaction(trx);
+               }
+               void operator()(generated_transaction_id_type) {
+#warning TODO: Process generated transaction
+               }
+
+               database& db;
+            } visitor{*this};
+
+            trx.visit(visitor);
+            ++_current_trx_in_block;
+         }
 
    update_global_dynamic_data(next_block);
    update_signing_producer(signing_producer, next_block);
@@ -461,17 +470,15 @@ void database::_apply_block( const signed_block& next_block )
 
 } FC_CAPTURE_AND_RETHROW( (next_block.block_num()) )  }
 
-signed_transaction database::apply_transaction(const signed_transaction& trx, uint32_t skip)
+void database::apply_transaction(const signed_transaction& trx, uint32_t skip)
 {
-   signed_transaction result;
-   detail::with_skip_flags( *this, skip, [&]()
+   detail::with_skip_flags(*this, skip, [&]()
    {
-      result = _apply_transaction(trx);
+      _apply_transaction(trx);
    });
-   return result;
 }
 
-signed_transaction database::_apply_transaction(const signed_transaction& trx)
+void database::_apply_transaction(const signed_transaction& trx)
 { try {
    uint32_t skip = get_node_properties().skip_flags;
 
@@ -480,33 +487,31 @@ signed_transaction database::_apply_transaction(const signed_transaction& trx)
 
    auto& trx_idx = get_mutable_index<transaction_multi_index>();
    auto trx_id = trx.id();
-   FC_ASSERT( (skip & skip_transaction_dupe_check) ||
-              trx_idx.indices().get<by_trx_id>().find(trx_id) == trx_idx.indices().get<by_trx_id>().end() );
-   transaction_evaluation_state eval_state(this);
+   FC_ASSERT((skip & skip_transaction_dupe_check) ||
+             trx_idx.indices().get<by_trx_id>().find(trx_id) == trx_idx.indices().get<by_trx_id>().end());
    const chain_parameters& chain_parameters = get_global_properties().parameters;
-   eval_state._trx = &trx;
 
    //Skip all manner of expiration and TaPoS checking if we're on block 1; It's impossible that the transaction is
    //expired, and TaPoS makes no sense as no blocks exist.
-   if( BOOST_LIKELY(head_block_num() > 0) )
+   if(BOOST_LIKELY(head_block_num() > 0))
    {
-      if( !(skip & skip_tapos_check) )
+      if(!(skip & skip_tapos_check))
       {
-         const auto& tapos_block_summary = get<block_summary_object>( trx.ref_block_num );
+         const auto& tapos_block_summary = get<block_summary_object>(trx.ref_block_num);
 
          //Verify TaPoS block summary has correct ID prefix, and that this block's time is not past the expiration
-         FC_ASSERT( trx.ref_block_prefix == tapos_block_summary.block_id._hash[1] );
+         FC_ASSERT(trx.ref_block_prefix == tapos_block_summary.block_id._hash[1]);
       }
 
       fc::time_point_sec now = head_block_time();
 
-      FC_ASSERT( trx.expiration <= now + chain_parameters.maximum_time_until_expiration, "",
-                 ("trx.expiration",trx.expiration)("now",now)("max_til_exp",chain_parameters.maximum_time_until_expiration));
-      FC_ASSERT( now <= trx.expiration, "", ("now",now)("trx.exp",trx.expiration) );
+      FC_ASSERT(trx.expiration <= now + chain_parameters.maximum_time_until_expiration, "",
+                ("trx.expiration",trx.expiration)("now",now)("max_til_exp",chain_parameters.maximum_time_until_expiration));
+      FC_ASSERT(now <= trx.expiration, "", ("now",now)("trx.exp",trx.expiration));
    }
 
    //Insert transaction into unique transactions database.
-   if( !(skip & skip_transaction_dupe_check) )
+   if(!(skip & skip_transaction_dupe_check))
    {
       create<transaction_object>([&](transaction_object& transaction) {
          transaction.trx_id = trx_id;
@@ -514,52 +519,36 @@ signed_transaction database::_apply_transaction(const signed_transaction& trx)
       });
    }
 
-   //Finally process the operations
+   //Finally, process the messages
    signed_transaction ptrx(trx);
-   _current_op_in_trx = 0;
-   for( const auto& op : ptrx.operations )
+   _current_message_in_trx = 0;
+   for(const auto& msg : ptrx.messages)
    {
-      apply_operation(eval_state, op);
-      ++_current_op_in_trx;
+#warning TODO: Process messages in transaction
+      ++_current_message_in_trx;
    }
+} FC_CAPTURE_AND_RETHROW((trx)) }
 
-   return ptrx;
-} FC_CAPTURE_AND_RETHROW( (trx) ) }
-
-void database::apply_operation(transaction_evaluation_state& eval_state, const operation& op)
-{ try {
-   int i_which = op.which();
-   uint64_t u_which = uint64_t( i_which );
-   if( i_which < 0 )
-      assert( "Negative operation tag" && false );
-   if( u_which >= _operation_evaluators.size() )
-      assert( "No registered evaluator for this operation" && false );
-   unique_ptr<op_evaluator>& eval = _operation_evaluators[ u_which ];
-   if( !eval )
-      assert( "No registered evaluator for this operation" && false );
-   eval->evaluate( eval_state, op, true );
-} FC_CAPTURE_AND_RETHROW( (op) ) }
-
-const producer_object& database::validate_block_header( uint32_t skip, const signed_block& next_block )const
+const producer_object& database::validate_block_header(uint32_t skip, const signed_block& next_block)const
 {
-   FC_ASSERT( head_block_id() == next_block.previous, "", ("head_block_id",head_block_id())("next.prev",next_block.previous) );
-   FC_ASSERT( head_block_time() < next_block.timestamp, "", ("head_block_time",head_block_time())("next",next_block.timestamp)("blocknum",next_block.block_num()) );
+   FC_ASSERT(head_block_id() == next_block.previous, "", ("head_block_id",head_block_id())("next.prev",next_block.previous));
+   FC_ASSERT(head_block_time() < next_block.timestamp, "", ("head_block_time",head_block_time())("next",next_block.timestamp)("blocknum",next_block.block_num()));
    const producer_object& producer = get(get_scheduled_producer(get_slot_at_time(next_block.timestamp)));
 
-   if( !(skip&skip_producer_signature) )
-      FC_ASSERT( next_block.validate_signee( producer.signing_key ),
-                 "Incorrect block producer key: expected ${e} but got ${a}",
-                 ("e", producer.signing_key)("a", public_key_type(next_block.signee())));
+   if(!(skip&skip_producer_signature))
+      FC_ASSERT(next_block.validate_signee(producer.signing_key),
+                "Incorrect block producer key: expected ${e} but got ${a}",
+                ("e", producer.signing_key)("a", public_key_type(next_block.signee())));
 
-   if( !(skip&skip_producer_schedule_check) )
+   if(!(skip&skip_producer_schedule_check))
    {
-      uint32_t slot_num = get_slot_at_time( next_block.timestamp );
-      FC_ASSERT( slot_num > 0 );
+      uint32_t slot_num = get_slot_at_time(next_block.timestamp);
+      FC_ASSERT(slot_num > 0);
 
-      producer_id_type scheduled_producer = get_scheduled_producer( slot_num );
+      producer_id_type scheduled_producer = get_scheduled_producer(slot_num);
 
-      FC_ASSERT( next_block.producer == scheduled_producer, "Producer produced block at wrong time",
-                 ("block producer",next_block.producer)("scheduled",scheduled_producer)("slot_num",slot_num) );
+      FC_ASSERT(next_block.producer == scheduled_producer, "Producer produced block at wrong time",
+                ("block producer",next_block.producer)("scheduled",scheduled_producer)("slot_num",slot_num));
    }
 
    return producer;
@@ -657,25 +646,9 @@ node_property_object& database::node_properties()
    return _node_property_object;
 }
 
-uint32_t database::last_non_undoable_block_num() const
+uint32_t database::last_irreversible_block_num() const
 {
-#warning TODO: Figure out how to do this
-   return 1; //head_block_num() - _undo_db.size();
-}
-
-// C++ requires that static class variables declared and initialized
-// in headers must also have a definition in a single source file,
-// else linker errors will occur [1].
-//
-// The purpose of this source file is to collect such definitions in
-// a single place.
-//
-// [1] http://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
-
-void database::initialize_evaluators()
-{
-   _operation_evaluators.resize(255);
-   // TODO: Figure out how to do this
+   return get_dynamic_global_properties().last_irreversible_block_num;
 }
 
 void database::initialize_indexes()
@@ -692,8 +665,8 @@ void database::initialize_indexes()
 void database::init_genesis(const genesis_state_type& genesis_state)
 { try {
    FC_ASSERT( genesis_state.initial_timestamp != time_point_sec(), "Must initialize genesis timestamp." );
-   FC_ASSERT( genesis_state.initial_timestamp.sec_since_epoch() % HOTC_DEFAULT_BLOCK_INTERVAL == 0,
-              "Genesis timestamp must be divisible by HOTC_DEFAULT_BLOCK_INTERVAL." );
+   FC_ASSERT( genesis_state.initial_timestamp.sec_since_epoch() % hotc_DEFAULT_BLOCK_INTERVAL == 0,
+              "Genesis timestamp must be divisible by hotc_DEFAULT_BLOCK_INTERVAL." );
    FC_ASSERT(genesis_state.initial_producer_count >= genesis_state.initial_producers.size(),
              "Initial producer count is ${c} but only ${w} producers were defined.",
              ("c", genesis_state.initial_producer_count)("w", genesis_state.initial_producers.size()));
@@ -717,7 +690,7 @@ void database::init_genesis(const genesis_state_type& genesis_state)
       });
    }
    // Create initial producers
-   std::vector<producer_id_type> initialProducers;
+   std::vector<producer_id_type> initial_producers;
    for (const auto& producer : genesis_state.initial_producers) {
       auto owner = find<account_object, by_name>(producer.owner_name);
       FC_ASSERT(owner != nullptr, "Producer belongs to an unknown account: ${acct}", ("acct", producer.owner_name));
@@ -725,19 +698,18 @@ void database::init_genesis(const genesis_state_type& genesis_state)
          w.signing_key = producer.block_signing_key;
          w.owner_name = producer.owner_name.c_str();
       }).id;
-      initialProducers.push_back(id);
+      initial_producers.push_back(id);
    }
 
-   transaction_evaluation_state genesis_eval_state(this);
-
    // Initialize block summary index
+#warning TODO: Figure out how to do this
 
    chain_id_type chain_id = genesis_state.compute_chain_id();
 
    // Create global properties
    create<global_property_object>([&](global_property_object& p) {
        p.parameters = genesis_state.initial_parameters;
-       p.active_producers = initialProducers;
+       p.active_producers = initial_producers;
    });
    create<dynamic_global_property_object>([&](dynamic_global_property_object& p) {
       p.time = genesis_state.initial_timestamp;
@@ -753,11 +725,6 @@ void database::init_genesis(const genesis_state_type& genesis_state)
       p.immutable_parameters = genesis_state.immutable_parameters;
    } );
    create<block_summary_object>([&](block_summary_object&) {});
-
-   //TODO: Figure out how to do this
-   // Create initial accounts
-   // Create initial producers
-   // Set active producers
 } FC_CAPTURE_AND_RETHROW() }
 
 database::database()
@@ -785,7 +752,6 @@ void database::reindex(fc::path data_dir, uint64_t shared_file_size, const genes
    const auto last_block_num = last_block->block_num();
 
    ilog( "Replaying blocks..." );
-//   _undo_db.disable();
    for( uint32_t i = 1; i <= last_block_num; ++i )
    {
       if( i % 5000 == 0 ) std::cerr << "   " << double(i*100)/last_block_num << "%   "<<i << " of " <<last_block_num<<"   \n";
@@ -816,9 +782,10 @@ void database::reindex(fc::path data_dir, uint64_t shared_file_size, const genes
                           skip_producer_schedule_check |
                           skip_authority_check);
    }
-//   _undo_db.enable();
    auto end = fc::time_point::now();
    ilog( "Done reindexing, elapsed time: ${t} sec", ("t",double((end-start).count())/1000000.0 ) );
+
+   set_revision(head_block_num());
 } FC_CAPTURE_AND_RETHROW( (data_dir) ) }
 
 void database::wipe(const fc::path& data_dir, bool include_blocks)
@@ -832,22 +799,26 @@ void database::wipe(const fc::path& data_dir, bool include_blocks)
 
 void database::open(const fc::path& data_dir, uint64_t shared_file_size,
                     std::function<genesis_state_type()> genesis_loader)
-{
-   try
-   {
+{ try {
       chainbase::database::open(data_dir, read_write, shared_file_size);
 
       initialize_indexes();
-      initialize_evaluators();
 
       _block_id_to_block.open(data_dir / "database" / "block_num_to_block");
 
       if( !find<global_property_object>() )
-         init_genesis(genesis_loader());
+         with_write_lock([this, genesis_loader = std::move(genesis_loader)] {
+            init_genesis(genesis_loader());
+         });
 
       fc::optional<signed_block> last_block = _block_id_to_block.last();
       if( last_block.valid() )
       {
+         // Rewind the database to the last irreversible block
+         with_write_lock([this] {
+            undo_all();
+         });
+
          _fork_db.start_block( *last_block );
          idump((last_block->id())(last_block->block_num()));
          idump((head_block_id())(head_block_num()));
@@ -857,9 +828,7 @@ void database::open(const fc::path& data_dir, uint64_t shared_file_size,
                          ("last_block->id", last_block->id())("head_block_num",head_block_num()) );
          }
       }
-   }
-   FC_CAPTURE_LOG_AND_RETHROW( (data_dir) )
-}
+} FC_CAPTURE_LOG_AND_RETHROW((data_dir)) }
 
 void database::close()
 {
@@ -909,9 +878,9 @@ void database::update_global_dynamic_data( const signed_block& b )
          else if( _checkpoints.size() && _checkpoints.rbegin()->first >= b.block_num() )
          dgp.recently_missed_count = 0;
       else if( missed_blocks )
-         dgp.recently_missed_count += HOTC_RECENTLY_MISSED_COUNT_INCREMENT*missed_blocks;
-      else if( dgp.recently_missed_count > HOTC_RECENTLY_MISSED_COUNT_INCREMENT )
-         dgp.recently_missed_count -= HOTC_RECENTLY_MISSED_COUNT_DECREMENT;
+         dgp.recently_missed_count += hotc_RECENTLY_MISSED_COUNT_INCREMENT*missed_blocks;
+      else if( dgp.recently_missed_count > hotc_RECENTLY_MISSED_COUNT_INCREMENT )
+         dgp.recently_missed_count -= hotc_RECENTLY_MISSED_COUNT_DECREMENT;
       else if( dgp.recently_missed_count > 0 )
          dgp.recently_missed_count--;
 
@@ -927,11 +896,11 @@ void database::update_global_dynamic_data( const signed_block& b )
 
    if( !(get_node_properties().skip_flags & skip_undo_history_check) )
    {
-      HOTC_ASSERT( _dgp.head_block_number - _dgp.last_irreversible_block_num  < HOTC_MAX_UNDO_HISTORY, undo_database_exception,
+      hotc_ASSERT( _dgp.head_block_number - _dgp.last_irreversible_block_num  < hotc_MAX_UNDO_HISTORY, undo_database_exception,
                  "The database does not have enough undo history to support a blockchain with so many missed blocks. "
                  "Please add a checkpoint if you would like to continue applying blocks beyond this point.",
                  ("last_irreversible_block_num",_dgp.last_irreversible_block_num)("head", _dgp.head_block_number)
-                 ("recently_missed",_dgp.recently_missed_count)("max_undo",HOTC_MAX_UNDO_HISTORY) );
+                 ("recently_missed",_dgp.recently_missed_count)("max_undo",hotc_MAX_UNDO_HISTORY) );
    }
 
    _fork_db.set_max_size( _dgp.head_block_number - _dgp.last_irreversible_block_num + 1 );
@@ -954,26 +923,26 @@ void database::update_last_irreversible_block()
    const global_property_object& gpo = get_global_properties();
    const dynamic_global_property_object& dpo = get_dynamic_global_properties();
 
-   vector< const producer_object* > wit_objs;
-   wit_objs.reserve( gpo.active_producers.size() );
-   for( const producer_id_type& wid : gpo.active_producers )
-      wit_objs.push_back( &(get(wid)) );
+   vector<const producer_object*> producer_objs;
+   producer_objs.reserve(gpo.active_producers.size());
+   std::transform(gpo.active_producers.begin(), gpo.active_producers.end(), std::back_inserter(producer_objs),
+                  [this](producer_id_type id) { return &get(id); });
 
-   static_assert( HOTC_IRREVERSIBLE_THRESHOLD > 0, "irreversible threshold must be nonzero" );
+   static_assert( hotc_IRREVERSIBLE_THRESHOLD > 0, "irreversible threshold must be nonzero" );
 
    // 1 1 1 2 2 2 2 2 2 2 -> 2     .7*10 = 7
    // 1 1 1 1 1 1 1 2 2 2 -> 1
    // 3 3 3 3 3 3 3 3 3 3 -> 3
 
-   size_t offset = ((HOTC_100_PERCENT - HOTC_IRREVERSIBLE_THRESHOLD) * wit_objs.size() / HOTC_100_PERCENT);
+   size_t offset = ((hotc_100_PERCENT - hotc_IRREVERSIBLE_THRESHOLD) * producer_objs.size() / hotc_100_PERCENT);
 
-   std::nth_element( wit_objs.begin(), wit_objs.begin() + offset, wit_objs.end(),
+   std::nth_element( producer_objs.begin(), producer_objs.begin() + offset, producer_objs.end(),
       []( const producer_object* a, const producer_object* b )
       {
          return a->last_confirmed_block_num < b->last_confirmed_block_num;
       } );
 
-   uint32_t new_last_irreversible_block_num = wit_objs[offset]->last_confirmed_block_num;
+   uint32_t new_last_irreversible_block_num = producer_objs[offset]->last_confirmed_block_num;
 
    if( new_last_irreversible_block_num > dpo.last_irreversible_block_num )
    {
@@ -982,6 +951,25 @@ void database::update_last_irreversible_block()
          _dpo.last_irreversible_block_num = new_last_irreversible_block_num;
       } );
    }
+
+   // Write newly irreversible blocks to disk. First, get the number of the last block on disk...
+   auto old_last_irreversible_block = _block_id_to_block.last();
+   int last_block_on_disk = 0;
+   // If this is null, there are no blocks on disk, so the zero is correct
+   if (old_last_irreversible_block)
+      last_block_on_disk = old_last_irreversible_block->block_num();
+   if (last_block_on_disk < new_last_irreversible_block_num)
+      for (auto block_to_write = last_block_on_disk + 1;
+           block_to_write <= new_last_irreversible_block_num;
+           ++block_to_write) {
+         auto block = fetch_block_by_number(block_to_write);
+         assert(block);
+         _block_id_to_block.store(block->id(), *block);
+      }
+
+   // Trim fork_database and undo histories
+   _fork_db.set_max_size(head_block_num() - new_last_irreversible_block_num + 1);
+   commit(new_last_irreversible_block_num);
 }
 
 void database::clear_expired_transactions()
@@ -1036,7 +1024,7 @@ uint32_t database::get_slot_at_time(fc::time_point_sec when)const
 uint32_t database::producer_participation_rate()const
 {
    const dynamic_global_property_object& dpo = get_dynamic_global_properties();
-   return uint64_t(HOTC_100_PERCENT) * dpo.recent_slots_filled.popcount() / 128;
+   return uint64_t(hotc_100_PERCENT) * dpo.recent_slots_filled.popcount() / 128;
 }
 
 void database::update_producer_schedule()

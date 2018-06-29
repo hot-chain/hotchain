@@ -4,7 +4,7 @@ add_library( hotc_producer
              producer.cpp
            )
 
-target_link_libraries( hotc_producer hotc_chain hotc_app )
+target_link_libraries( hotc_producer appbase hotc_chain hotc_utilities )
 target_include_directories( hotc_producer
                             PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" )
 

@@ -12,18 +12,18 @@ add_executable( embed_genesis
    embed_genesis.cpp
    )
 
-target_link_libraries( embed_genesis hotc_chain hotc_app hotc_egenesis_none fc )
+target_link_libraries( embed_genesis hotc_chain hotc_egenesis_none fc )
 
 set( embed_genesis_args
    -t "${CMAKE_CURRENT_SOURCE_DIR}/egenesis_brief.cpp.tmpl---${CMAKE_CURRENT_BINARY_DIR}/egenesis_brief.cpp"
    -t "${CMAKE_CURRENT_SOURCE_DIR}/egenesis_full.cpp.tmpl---${CMAKE_CURRENT_BINARY_DIR}/egenesis_full.cpp"
    )
 
-MESSAGE( STATUS "egenesis: " ${HOTC_EGENESIS_JSON} )
+MESSAGE( STATUS "egenesis: " ${hotc_EGENESIS_JSON} )
 
-if( HOTC_EGENESIS_JSON )
-   list( APPEND embed_genesis_args --genesis-json "${HOTC_EGENESIS_JSON}" )
-endif( HOTC_EGENESIS_JSON )
+if( hotc_EGENESIS_JSON )
+   list( APPEND embed_genesis_args --genesis-json "${hotc_EGENESIS_JSON}" )
+endif( hotc_EGENESIS_JSON )
 
 MESSAGE( STATUS "embed_genesis_args: " ${embed_genesis_args} )
 
@@ -34,7 +34,7 @@ add_custom_command(
    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
    COMMAND embed_genesis ${embed_genesis_args}
    DEPENDS
-      "${HOTC_EGENESIS_JSON}"
+      "${hotc_EGENESIS_JSON}"
       "${CMAKE_CURRENT_SOURCE_DIR}/egenesis_brief.cpp.tmpl"
       "${CMAKE_CURRENT_SOURCE_DIR}/egenesis_full.cpp.tmpl"
       embed_genesis )

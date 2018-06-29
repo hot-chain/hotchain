@@ -1,8 +1,9 @@
-# Defines Hotc library target.
-project( Hotc )
+# Defines hotc library target.
+project( hotc )
 cmake_minimum_required( VERSION 2.8.12 )
 
-set( BLOCKCHAIN_NAME "BitShares" )
+set( BLOCKCHAIN_NAME "hotc" )
+set( CMAKE_CXX_STANDARD 14 )
 
 set( CLI_CLIENT_EXECUTABLE_NAME hotc_client )
 set( GUI_CLIENT_EXECUTABLE_NAME hotc )
@@ -23,7 +24,7 @@ endif()
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMakeModules" )
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS "ON")
-set(HOTC_EGENESIS_JSON "${CMAKE_CURRENT_SOURCE_DIR}/genesis.json" )
+set(hotc_EGENESIS_JSON "${CMAKE_CURRENT_SOURCE_DIR}/genesis.json" )
 
 #set (ENABLE_INSTALLER 1)
 #set (USE_PCH 1)
@@ -68,7 +69,7 @@ ENDIF()
 
 if( WIN32 )
 
-    message( STATUS "Configuring BitShares on WIN32")
+    message( STATUS "Configuring hotc on WIN32")
     set( DB_VERSION 60 )
     set( BDB_STATIC_LIBS 1 )
 
@@ -109,12 +110,12 @@ else( WIN32 ) # Apple AND Linux
 
     if( APPLE )
         # Apple Specific Options Here
-        message( STATUS "Configuring BitShares on OS X" )
-        set( CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++11 -stdlib=libc++ -Wall" )
+        message( STATUS "Configuring hotc on OS X" )
+        set( CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -Wall" )
     else( APPLE )
         # Linux Specific Options Here
-        message( STATUS "Configuring BitShares on Linux" )
-        set( CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++11 -Wall" )
+        message( STATUS "Configuring hotc on Linux" )
+        set( CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -Wall" )
         set( rt_library rt )
         set( pthread_library pthread)
         if ( NOT DEFINED crypto_library )
@@ -143,7 +144,7 @@ else( WIN32 ) # Apple AND Linux
 
 endif( WIN32 )
 
-set(ENABLE_COVERAGE_TESTING FALSE CACHE BOOL "Build BitShares for code coverage analysis")
+set(ENABLE_COVERAGE_TESTING FALSE CACHE BOOL "Build hotc for code coverage analysis")
 
 if(ENABLE_COVERAGE_TESTING)
     SET(CMAKE_CXX_FLAGS "--coverage ${CMAKE_CXX_FLAGS}")
@@ -151,6 +152,7 @@ endif()
 
 add_subdirectory( libraries )
 add_subdirectory( programs )
+add_subdirectory( plugins )
 add_subdirectory( tests )
 
 if (ENABLE_INSTALLER)
@@ -167,23 +169,23 @@ set(CMAKE_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/install)
 
 SET(CPACK_PACKAGE_DIRECTORY "${CMAKE_INSTALL_PREFIX}")
 set(CPACK_PACKAGE_NAME "hotc")
-set(CPACK_PACKAGE_VENDOR "HOTCIO")
+set(CPACK_PACKAGE_VENDOR "hotcIO")
 set(CPACK_PACKAGE_VERSION_MAJOR "${VERSION_MAJOR}")
 set(CPACK_PACKAGE_VERSION_MINOR "${VERSION_MINOR}")
 set(CPACK_PACKAGE_VERSION_PATCH "${VERSION_PATCH}")
 set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
-set(CPACK_PACKAGE_DESCRIPTION "A client for the BitShares network")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A client for the BitShares network")
+set(CPACK_PACKAGE_DESCRIPTION "A client for the hotc network")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A client for the hotc network")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY "BitShares ${CPACK_PACKAGE_VERSION}")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "hotc ${CPACK_PACKAGE_VERSION}")
 
 if(WIN32)
  SET(CPACK_GENERATOR "ZIP;NSIS")
- set(CPACK_PACKAGE_NAME "BitShares") # override above
+ set(CPACK_PACKAGE_NAME "hotc") # override above
  set(CPACK_NSIS_EXECUTABLES_DIRECTORY .)
- set(CPACK_NSIS_PACKAGE_NAME "BitShares v${CPACK_PACKAGE_VERSION}")
+ set(CPACK_NSIS_PACKAGE_NAME "hotc v${CPACK_PACKAGE_VERSION}")
  set(CPACK_NSIS_DISPLAY_NAME "${CPACK_NSIS_PACKAGE_NAME}")
- set(CPACK_NSIS_DEFINES "  !define MUI_STARTMENUPAGE_DEFAULTFOLDER \\\"BitShares\\\"")
+ set(CPACK_NSIS_DEFINES "  !define MUI_STARTMENUPAGE_DEFAULTFOLDER \\\"hotc\\\"")
  # it seems like windows zip files usually don't have a single directory inside them, unix tgz frequently do
  SET(CPACK_INCLUDE_TOPLEVEL_DIRECTORY 0)
 
