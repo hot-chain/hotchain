@@ -27,9 +27,9 @@
 #include <hotc/chain/fork_database.hpp>
 #include <hotc/chain/block_database.hpp>
 #include <hotc/chain/genesis_state.hpp>
-#include <hotc/chain/evaluator.hpp>
 
 #include <chainbase/chainbase.hpp>
+#include <fc/scoped_exit.hpp>
 #include <fc/signals.hpp>
 
 #include <hotc/chain/protocol/protocol.hpp>
@@ -39,11 +39,6 @@
 #include <map>
 
 namespace hotc { namespace chain {
-   class op_evaluator;
-   class transaction_evaluation_state;
-
-   struct budget_record;
-
    /**
     *   @class database
     *   @brief tracks the blockchain state in an extensible manner
@@ -51,8 +46,6 @@ namespace hotc { namespace chain {
    class database : public chainbase::database
    {
       public:
-         //////////////////// db_management.cpp ////////////////////
-
          database();
          ~database();
 
@@ -106,8 +99,6 @@ namespace hotc { namespace chain {
          void wipe(const fc::path& data_dir, bool include_blocks);
          void close();
 
-         //////////////////// db_block.cpp ////////////////////
-
          /**
           *  @return true if the block is in our fork DB or saved to disk as
           *  part of the official chain, otherwise return false
@@ -131,9 +122,9 @@ namespace hotc { namespace chain {
          bool before_last_checkpoint()const;
 
          bool push_block( const signed_block& b, uint32_t skip = skip_nothing );
-         signed_transaction push_transaction( const signed_transaction& trx, uint32_t skip = skip_nothing );
+         void push_transaction( const signed_transaction& trx, uint32_t skip = skip_nothing );
          bool _push_block( const signed_block& b );
-         signed_transaction _push_transaction( const signed_transaction& trx );
+         void _push_transaction( const signed_transaction& trx );
 
          signed_block generate_block(
             const fc::time_point_sec when,
@@ -147,19 +138,44 @@ namespace hotc { namespace chain {
             const fc::ecc::private_key& block_signing_private_key
             );
 
+
+         template<typename Function>
+         auto with_skip_flags( uint64_t flags, Function&& f ) -> decltype((*((Function*)nullptr))()) 
+         {
+            auto old_flags = _skip_flags;
+            auto on_exit   = fc::make_scoped_exit( [&](){ _skip_flags = old_flags; } );
+            _skip_flags = flags;
+            return f();
+         }
+
+         template<typename Function>
+         auto with_producing( Function&& f ) -> decltype((*((Function*)nullptr))()) 
+         {
+            auto old_producing = _producing;
+            auto on_exit   = fc::make_scoped_exit( [&](){ _producing = old_producing; } );
+            _producing = true;
+            return f();
+         }
+
+
+         template<typename Function>
+         auto without_pending_transactions( Function&& f ) -> decltype((*((Function*)nullptr))()) 
+         {
+            auto old_pending = std::move( _pending_transactions );
+            _pending_tx_session.reset();
+            auto on_exit = fc::make_scoped_exit( [&](){ 
+               for( const auto& t : old_pending ) {
+                  try {
+                     push_transaction( t );
+                  } catch ( ... ){}
+               }
+            });
+            return f();
+         }
+
+
          void pop_block();
          void clear_pending();
-
-         /**
-          *  This method is used to track appied operations during the evaluation of a block, these
-          *  operations should include any operation actually included in a transaction as well
-          *  as any implied/virtual operations that resulted, such as filling an order.  The
-          *  applied operations is cleared after applying each block and calling the block
-          *  observers which may want to index these operations.
-          *
-          *  @return the op_id which can be used to set the result after it has finished being applied.
-          */
-         uint32_t  push_applied_operation( const operation& op );
 
          /**
           *  This signal is emitted after all operations and virtual operation for a
@@ -169,15 +185,13 @@ namespace hotc { namespace chain {
           *  the write lock and may be in an "inconstant state" until after it is
           *  released.
           */
-         fc::signal<void(const signed_block&)>           applied_block;
+         fc::signal<void(const signed_block&)> applied_block;
 
          /**
           * This signal is emitted any time a new transaction is added to the pending
           * block state.
           */
-         fc::signal<void(const signed_transaction&)>     on_pending_transaction;
-
-         //////////////////// db_producer_schedule.cpp ////////////////////
+         fc::signal<void(const signed_transaction&)> on_pending_transaction;
 
          /**
           * @brief Get the producer scheduled for block production in a slot.
@@ -217,8 +231,6 @@ namespace hotc { namespace chain {
 
          void update_producer_schedule();
 
-         //////////////////// db_getter.cpp ////////////////////
-
          const chain_id_type&                   get_chain_id()const;
          const global_property_object&          get_global_properties()const;
          const dynamic_global_property_object&  get_dynamic_global_properties()const;
@@ -229,65 +241,51 @@ namespace hotc { namespace chain {
          block_id_type    head_block_id()const;
          producer_id_type head_block_producer()const;
 
-         decltype( chain_parameters::block_interval ) block_interval( )const;
+         uint32_t  block_interval( )const { return HOTC_BLOCK_INTERVAL_SEC; }
 
          node_property_object& node_properties();
 
 
-         uint32_t last_non_undoable_block_num() const;
-         //////////////////// db_init.cpp ////////////////////
+         uint32_t last_irreversible_block_num() const;
 
-         void initialize_evaluators();
          /// Reset the object graph in-memory
          void initialize_indexes();
          void init_genesis(const genesis_state_type& genesis_state = genesis_state_type());
 
-         //////////////////// db_debug.cpp ////////////////////
-
          void debug_dump();
          void apply_debug_updates();
-         void debug_update( const fc::variant_object& update );
+         void debug_update(const fc::variant_object& update);
 
          /**
            *  This method validates transactions without adding it to the pending state.
            *  @return true if the transaction would validate
            */
-          signed_transaction validate_transaction( const signed_transaction& trx );
-
-
-          /** when popping a block, the transactions that were removed get cached here so they
-           * can be reapplied at the proper time */
-          std::deque< signed_transaction >       _popped_tx;
+          void validate_transaction(const signed_transaction& trx);
 
        private:
           optional<session> _pending_tx_session;
-          vector<unique_ptr<op_evaluator>> _operation_evaluators;
-
-         //////////////////// db_block.cpp ////////////////////
 
        public:
          // these were formerly private, but they have a fairly well-defined API, so let's make them public
-         void               apply_block( const signed_block& next_block, uint32_t skip = skip_nothing );
-         signed_transaction apply_transaction( const signed_transaction& trx, uint32_t skip = skip_nothing );
-         void               apply_operation( transaction_evaluation_state& eval_state, const operation& op );
+         void apply_block(const signed_block& next_block, uint32_t skip = skip_nothing);
+         void apply_transaction(const signed_transaction& trx, uint32_t skip = skip_nothing);
       private:
-         void               _apply_block( const signed_block& next_block );
-         signed_transaction _apply_transaction( const signed_transaction& trx );
+         void _apply_block(const signed_block& next_block);
+         void _apply_transaction(const signed_transaction& trx);
 
          ///Steps involved in applying a new block
          ///@{
 
-         const producer_object& validate_block_header( uint32_t skip, const signed_block& next_block )const;
-         const producer_object& _validate_block_header( const signed_block& next_block )const;
+         const producer_object& validate_block_header(uint32_t skip, const signed_block& next_block)const;
+         const producer_object& _validate_block_header(const signed_block& next_block)const;
          void create_block_summary(const signed_block& next_block);
 
-         //////////////////// db_update.cpp ////////////////////
-         void update_global_dynamic_data( const signed_block& b );
+         void update_global_dynamic_data(const signed_block& b);
          void update_signing_producer(const producer_object& signing_producer, const signed_block& new_block);
          void update_last_irreversible_block();
          void clear_expired_transactions();
 
-         vector< signed_transaction >        _pending_tx;
+         deque< signed_transaction >         _pending_transactions;
          fork_database                       _fork_db;
 
          /**
@@ -301,23 +299,8 @@ namespace hotc { namespace chain {
           */
          block_database   _block_id_to_block;
 
-         /**
-          * Contains the set of ops that are in the process of being applied from
-          * the current block.  It contains real and virtual operations in the
-          * order they occur and is cleared after the applied_block signal is
-          * emited.
-          */
-         vector<optional<operation_history_object> >  _applied_ops;
-
-         uint32_t                          _current_block_num    = 0;
-         uint16_t                          _current_trx_in_block = 0;
-         uint16_t                          _current_op_in_trx    = 0;
-         uint16_t                          _current_virtual_op   = 0;
-
-         vector<uint64_t>                  _vote_tally_buffer;
-         vector<uint64_t>                  _producer_count_histogram_buffer;
-         vector<uint64_t>                  _committee_count_histogram_buffer;
-         uint64_t                          _total_voting_stake;
+         bool                              _producing = false;
+         uint64_t                          _skip_flags = 0;
 
          flat_map<uint32_t,block_id_type>  _checkpoints;
 

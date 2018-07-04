@@ -33,7 +33,7 @@ namespace hotc { namespace chain {
 
 struct immutable_chain_parameters
 {
-   uint16_t min_producer_count = HOTC_DEFAULT_MIN_PRODUCER_COUNT;
+   uint16_t min_producer_count = 21;
 };
 
 } } // hotc::chain
