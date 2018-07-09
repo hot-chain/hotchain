@@ -128,7 +128,9 @@ bool database::push_block(const signed_block& new_block, uint32_t skip)
 { try {
    return with_skip_flags( skip, [&](){ 
       return without_pending_transactions( [&]() {
-         return with_write_lock( [&]() { return _push_block(new_block); } );
+         //return with_write_lock( [&]() { 
+            return _push_block(new_block); 
+         //} );
       });
    });
 } FC_CAPTURE_AND_RETHROW( (new_block) ) }
@@ -351,7 +353,8 @@ signed_block database::_generate_block(
    pending_block.previous = head_block_id();
    pending_block.timestamp = when;
    pending_block.transaction_merkle_root = pending_block.calculate_merkle_root();
-   pending_block.producer = producer_id;
+
+   pending_block.producer = static_cast<uint16_t>(producer_id._id); //pa.name.c_str(); //producer_id;
 
    if( !(skip & skip_producer_signature) )
       pending_block.sign( block_signing_private_key );
@@ -624,7 +627,11 @@ uint32_t database::last_irreversible_block_num() const
 
 void database::initialize_indexes()
 {
-   add_index<account_multi_index>();
+   add_index<account_index>();
+   add_index<permission_index>();
+   add_index<action_code_index>();
+   add_index<action_permission_index>();
+
    add_index<global_property_multi_index>();
    add_index<dynamic_global_property_multi_index>();
    add_index<block_summary_multi_index>();
@@ -637,7 +644,7 @@ void database::init_genesis(const genesis_state_type& genesis_state)
 { try {
    FC_ASSERT( genesis_state.initial_timestamp != time_point_sec(), "Must initialize genesis timestamp." );
    FC_ASSERT( genesis_state.initial_timestamp.sec_since_epoch() % HOTC_BLOCK_INTERVAL_SEC == 0,
-              "Genesis timestamp must be divisible by HOTC_DEFAULT_BLOCK_INTERVAL." );
+              "Genesis timestamp must be divisible by HOTC_BLOCK_INTERVAL_SEC." );
 
    struct auth_inhibitor {
       auth_inhibitor(database& db) : db(db), old_flags(db.node_properties().skip_flags)
@@ -653,18 +660,17 @@ void database::init_genesis(const genesis_state_type& genesis_state)
    for (const auto& acct : genesis_state.initial_accounts) {
       create<account_object>([&acct](account_object& a) {
          a.name = acct.name.c_str();
-         a.active_key = acct.active_key;
-         a.owner_key = acct.owner_key;
+//         a.active_key = acct.active_key;
+//         a.owner_key = acct.owner_key;
       });
    }
    // Create initial producers
    std::vector<producer_id_type> initial_producers;
    for (const auto& producer : genesis_state.initial_producers) {
-      auto owner = find<account_object, by_name>(producer.owner_name);
-      FC_ASSERT(owner != nullptr, "Producer belongs to an unknown account: ${acct}", ("acct", producer.owner_name));
-      auto id = create<producer_object>([&producer](producer_object& w) {
+      const auto& owner = get<account_object, by_name>(producer.owner_name);
+      auto id = create<producer_object>([&](producer_object& w) {
          w.signing_key = producer.block_signing_key;
-         w.owner_name = producer.owner_name.c_str();
+         w.owner = owner.id;
       }).id;
       initial_producers.push_back(id);
    }
@@ -677,13 +683,12 @@ void database::init_genesis(const genesis_state_type& genesis_state)
    // Create global properties
    create<global_property_object>([&](global_property_object& p) {
        p.parameters = genesis_state.initial_parameters;
-       p.active_producers.resize(initial_producers.size());
+       //p.active_producers.resize(initial_producers.size());
        std::copy(initial_producers.begin(), initial_producers.end(), p.active_producers.begin());
    });
    create<dynamic_global_property_object>([&](dynamic_global_property_object& p) {
       p.time = genesis_state.initial_timestamp;
-      p.dynamic_flags = 0;
-      p.recent_slots_filled = fc::uint128::max_value();
+      p.recent_slots_filled = uint64_t(-1);
    });
 
    FC_ASSERT( (genesis_state.immutable_parameters.min_producer_count & 1) == 1, "min_producer_count must be odd" );
@@ -775,10 +780,11 @@ void database::open(const fc::path& data_dir, uint64_t shared_file_size,
 
       _block_id_to_block.open(data_dir / "database" / "block_num_to_block");
 
-      if( !find<global_property_object>() )
+      if( !find<global_property_object>() ) {
          with_write_lock([&] {
             init_genesis(genesis_loader());
          });
+      }
 
       // Rewind the database to the last irreversible block
       with_write_lock([&] {
@@ -970,7 +976,7 @@ uint32_t database::get_slot_at_time(fc::time_point_sec when)const
 uint32_t database::producer_participation_rate()const
 {
    const dynamic_global_property_object& dpo = get_dynamic_global_properties();
-   return uint64_t(HOTC_100_PERCENT) * dpo.recent_slots_filled.popcount() / 128;
+   return uint64_t(HOTC_100_PERCENT) * __builtin_popcountll(dpo.recent_slots_filled) / 64;
 }
 
 void database::update_producer_schedule()

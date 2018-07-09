@@ -47,12 +47,21 @@
 
 #include <chainbase/chainbase.hpp>
 
-#define OBJECT_CTOR(NAME) \
+#define OBJECT_CTOR1(NAME) \
     NAME() = delete; \
     public: \
     template<typename Constructor, typename Allocator> \
     NAME(Constructor&& c, chainbase::allocator<Allocator> a) \
     { c(*this); }
+#define OBJECT_CTOR2_MACRO(x, y, field) ,field(a)
+#define OBJECT_CTOR2(NAME, FIELDS) \
+    NAME() = delete; \
+    public: \
+    template<typename Constructor, typename Allocator> \
+    NAME(Constructor&& c, chainbase::allocator<Allocator> a) \
+    : id(0) BOOST_PP_SEQ_FOR_EACH(OBJECT_CTOR2_MACRO, _, FIELDS) \
+    { c(*this); }
+#define OBJECT_CTOR(...) BOOST_PP_OVERLOAD(OBJECT_CTOR, __VA_ARGS__)(__VA_ARGS__)
 
 namespace hotc { namespace chain {
    using                               std::map;
@@ -89,24 +98,30 @@ namespace hotc { namespace chain {
 
    using chainbase::allocator;
    using shared_string = boost::interprocess::basic_string<char, std::char_traits<char>, allocator<char>>;
+   template<typename T>
+   using shared_vector = boost::interprocess::vector<T, allocator<T>>;
 
    using private_key_type = fc::ecc::private_key;
    using chain_id_type = fc::sha256;
 
-   using account = std::string;
+   using account_name = std::string;
    using message_type = std::string;
+   using privilege_class = std::string;
 
    /**
-    *  List all object types from all namespaces here so they can
-    *  be easily reflected and displayed in debug output.  If a 3rd party
-    *  wants to extend the core code then they will have to change the
-    *  packed_object::type field from enum_type to uint16 to avoid
-    *  warnings when converting packed_objects to/from json.
+    * List all object types from all namespaces here so they can
+    * be easily reflected and displayed in debug output.  If a 3rd party
+    * wants to extend the core code then they will have to change the
+    * packed_object::type field from enum_type to uint16 to avoid
+    * warnings when converting packed_objects to/from json.
     */
    enum object_type
    {
       null_object_type,
       account_object_type,
+      permission_object_type,
+      action_code_object_type,
+      action_permission_object_type,
       global_property_object_type,
       dynamic_global_property_object_type,
       block_summary_object_type,
@@ -119,16 +134,16 @@ namespace hotc { namespace chain {
    class account_object;
    class producer_object;
 
-   using account_id_type = chainbase::oid<account_object>;
+   using account_id_type  = chainbase::oid<account_object>;
    using producer_id_type = chainbase::oid<producer_object>;
 
-   typedef fc::ripemd160                                        block_id_type;
-   typedef fc::ripemd160                                        checksum_type;
-   typedef fc::ripemd160                                        transaction_id_type;
-   typedef fc::sha256                                           digest_type;
-   typedef fc::ecc::compact_signature                           signature_type;
-   typedef safe<int64_t>                                        share_type;
-   typedef uint16_t                                             weight_type;
+   using block_id_type = fc::ripemd160;
+   using checksum_type = fc::ripemd160;
+   using transaction_id_type = fc::ripemd160;
+   using digest_type = fc::sha256;
+   using generated_transaction_id_type = fc::sha256;
+   using signature_type = fc::ecc::compact_signature;
+   using weight_type = uint16_t;
 
    struct public_key_type
    {
@@ -150,71 +165,20 @@ namespace hotc { namespace chain {
        friend bool operator == ( const public_key_type& p1, const public_key_type& p2);
        friend bool operator != ( const public_key_type& p1, const public_key_type& p2);
        friend bool operator < ( const public_key_type& p1, const public_key_type& p2);
-       // TODO: This is temporary for testing
        bool is_valid_v1( const std::string& base58str );
    };
 
-   struct extended_public_key_type
-   {
-      struct binary_key
-      {
-         binary_key() {}
-         uint32_t                   check = 0;
-         fc::ecc::extended_key_data data;
-      };
-      
-      fc::ecc::extended_key_data key_data;
-       
-      extended_public_key_type();
-      extended_public_key_type( const fc::ecc::extended_key_data& data );
-      extended_public_key_type( const fc::ecc::extended_public_key& extpubkey );
-      explicit extended_public_key_type( const std::string& base58str );
-      operator fc::ecc::extended_public_key() const;
-      explicit operator std::string() const;
-      friend bool operator == ( const extended_public_key_type& p1, const fc::ecc::extended_public_key& p2);
-      friend bool operator == ( const extended_public_key_type& p1, const extended_public_key_type& p2);
-      friend bool operator != ( const extended_public_key_type& p1, const extended_public_key_type& p2);
-   };
    
-   struct extended_private_key_type
-   {
-      struct binary_key
-      {
-         binary_key() {}
-         uint32_t                   check = 0;
-         fc::ecc::extended_key_data data;
-      };
-      
-      fc::ecc::extended_key_data key_data;
-       
-      extended_private_key_type();
-      extended_private_key_type( const fc::ecc::extended_key_data& data );
-      extended_private_key_type( const fc::ecc::extended_private_key& extprivkey );
-      explicit extended_private_key_type( const std::string& base58str );
-      operator fc::ecc::extended_private_key() const;
-      explicit operator std::string() const;
-      friend bool operator == ( const extended_private_key_type& p1, const fc::ecc::extended_private_key& p2);
-      friend bool operator == ( const extended_private_key_type& p1, const extended_private_key_type& p2);
-      friend bool operator != ( const extended_private_key_type& p1, const extended_private_key_type& p2);
-   };
 } }  // hotc::chain
 
 namespace fc
 {
     void to_variant( const hotc::chain::public_key_type& var,  fc::variant& vo );
     void from_variant( const fc::variant& var,  hotc::chain::public_key_type& vo );
-    void to_variant( const hotc::chain::extended_public_key_type& var, fc::variant& vo );
-    void from_variant( const fc::variant& var, hotc::chain::extended_public_key_type& vo );
-    void to_variant( const hotc::chain::extended_private_key_type& var, fc::variant& vo );
-    void from_variant( const fc::variant& var, hotc::chain::extended_private_key_type& vo );
 }
 
 FC_REFLECT( hotc::chain::public_key_type, (key_data) )
 FC_REFLECT( hotc::chain::public_key_type::binary_key, (data)(check) )
-FC_REFLECT( hotc::chain::extended_public_key_type, (key_data) )
-FC_REFLECT( hotc::chain::extended_public_key_type::binary_key, (check)(data) )
-FC_REFLECT( hotc::chain::extended_private_key_type, (key_data) )
-FC_REFLECT( hotc::chain::extended_private_key_type::binary_key, (check)(data) )
 
 FC_REFLECT(hotc::chain::account_id_type, (_id))
 FC_REFLECT(hotc::chain::producer_id_type, (_id))
@@ -222,6 +186,9 @@ FC_REFLECT(hotc::chain::producer_id_type, (_id))
 FC_REFLECT_ENUM( hotc::chain::object_type,
                  (null_object_type)
                  (account_object_type)
+                 (permission_object_type)
+                 (action_code_object_type)
+                 (action_permission_object_type)
                  (global_property_object_type)
                  (dynamic_global_property_object_type)
                  (block_summary_object_type)
