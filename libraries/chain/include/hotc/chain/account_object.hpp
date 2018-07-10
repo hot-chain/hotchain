@@ -33,6 +33,10 @@ namespace hotc { namespace chain {
 
       id_type           id;
       shared_string     name;
+      uint64_t          balance                = 0;
+      uint64_t          votes                  = 0;
+      uint64_t          converting_votes       = 0;
+      time_point_sec    last_vote_conversion;
    };
 
    struct by_name;
@@ -171,7 +175,7 @@ CHAINBASE_SET_INDEX_TYPE(hotc::chain::permission_object, hotc::chain::permission
 CHAINBASE_SET_INDEX_TYPE(hotc::chain::action_code_object, hotc::chain::action_code_index)
 CHAINBASE_SET_INDEX_TYPE(hotc::chain::action_permission_object, hotc::chain::action_permission_index)
 
-FC_REFLECT(hotc::chain::account_object, (id)(name))
+FC_REFLECT(hotc::chain::account_object, (id)(name)(balance)(votes)(converting_votes)(last_vote_conversion) )
 FC_REFLECT(hotc::chain::permission_object, (id)(owner)(parent)(name) )
 FC_REFLECT(hotc::chain::action_code_object, (id)(scope)(permission)(action)(validate_action)(validate_precondition)(apply) )
 FC_REFLECT(hotc::chain::action_permission_object, (id)(owner)(owner_permission)(scope_permission) )

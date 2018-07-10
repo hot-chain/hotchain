@@ -34,10 +34,12 @@
 
 #include "../common/database_fixture.hpp"
 
-using namespace hotc::chain;
+using namespace hotc;
+using namespace chain;
 
 BOOST_AUTO_TEST_SUITE(block_tests)
 
+// Simple test of block production and head_block_num tracking
 BOOST_FIXTURE_TEST_CASE(produce_blocks, testing_fixture)
 { try {
       MKDB(db)
@@ -51,6 +53,37 @@ BOOST_FIXTURE_TEST_CASE(produce_blocks, testing_fixture)
       BOOST_CHECK_EQUAL(db.head_block_num(), db.get_global_properties().active_producers.size() + 6);
 } FC_LOG_AND_RETHROW() }
 
+// Simple test to verify a simple transfer transaction works
+BOOST_FIXTURE_TEST_CASE(transfer, testing_fixture)
+{ try {
+      MKDB(db)
+
+      BOOST_CHECK_EQUAL(db.head_block_num(), 0);
+      db.produce_blocks(10);
+      BOOST_CHECK_EQUAL(db.head_block_num(), 10);
+
+      signed_transaction trx;
+      BOOST_REQUIRE_THROW( db.push_transaction(trx), fc::assert_exception ); /// no messages
+      trx.messages.resize(1);
+
+
+      trx.set_reference_block( db.head_block_id() );
+      trx.set_expiration( db.head_block_time() );
+      ilog(".");
+      db.push_transaction(trx);
+      ilog(".");
+
+      db.produce_blocks(1);
+      ilog(".");
+
+      BOOST_REQUIRE_THROW( db.push_transaction(trx), fc::assert_exception ); /// no messages
+
+
+
+} FC_LOG_AND_RETHROW() }
+
+
+// Simple test of block production when a block is missed
 BOOST_FIXTURE_TEST_CASE(missed_blocks, testing_fixture)
 { try {
       MKDB(db)
@@ -76,6 +109,7 @@ BOOST_FIXTURE_TEST_CASE(missed_blocks, testing_fixture)
       }
 } FC_LOG_AND_RETHROW() }
 
+// Simple sanity test of test network: if databases aren't connected to the network, they don't sync to eachother
 BOOST_FIXTURE_TEST_CASE(no_network, testing_fixture)
 { try {
       MKDBS((db1)(db2))
@@ -90,6 +124,7 @@ BOOST_FIXTURE_TEST_CASE(no_network, testing_fixture)
       BOOST_CHECK_EQUAL(db2.head_block_num(), 5);
 } FC_LOG_AND_RETHROW() }
 
+// Test that two databases on the same network do sync to eachother
 BOOST_FIXTURE_TEST_CASE(simple_network, testing_fixture)
 { try {
       MKDBS((db1)(db2))
@@ -107,6 +142,7 @@ BOOST_FIXTURE_TEST_CASE(simple_network, testing_fixture)
       BOOST_CHECK_EQUAL(db1.head_block_id().str(), db2.head_block_id().str());
 } FC_LOG_AND_RETHROW() }
 
+// Test that two databases joining and leaving a network sync correctly after a fork
 BOOST_FIXTURE_TEST_CASE(forked_network, testing_fixture)
 { try {
       MKDBS((db1)(db2))
@@ -143,6 +179,7 @@ BOOST_FIXTURE_TEST_CASE(forked_network, testing_fixture)
       BOOST_CHECK_EQUAL(db1.head_block_id().str(), db2.head_block_id().str());
 } FC_LOG_AND_RETHROW() }
 
+// Check that the recent_slots_filled bitmap is being updated correctly
 BOOST_FIXTURE_TEST_CASE( rsf_missed_blocks, testing_fixture )
 { try {
       MKDB(db)
@@ -150,12 +187,12 @@ BOOST_FIXTURE_TEST_CASE( rsf_missed_blocks, testing_fixture )
 
       auto rsf = [&]() -> string
       {
-         fc::uint128 rsf = db.get_dynamic_global_properties().recent_slots_filled;
+         auto rsf = db.get_dynamic_global_properties().recent_slots_filled;
          string result = "";
-         result.reserve(128);
-         for( int i=0; i<128; i++ )
+         result.reserve(64);
+         for( int i=0; i<64; i++ )
          {
-            result += ((rsf.lo & 1) == 0) ? '0' : '1';
+            result += ((rsf & 1) == 0) ? '0' : '1';
             rsf >>= 1;
          }
          return result;
@@ -163,159 +200,171 @@ BOOST_FIXTURE_TEST_CASE( rsf_missed_blocks, testing_fixture )
 
       auto pct = []( uint32_t x ) -> uint32_t
       {
-         return uint64_t( HOTC_100_PERCENT ) * x / 128;
+         return uint64_t( config::Percent100 ) * x / 64;
       };
 
       BOOST_CHECK_EQUAL( rsf(),
          "1111111111111111111111111111111111111111111111111111111111111111"
-         "1111111111111111111111111111111111111111111111111111111111111111"
       );
-      BOOST_CHECK_EQUAL( db.producer_participation_rate(), HOTC_100_PERCENT );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), config::Percent100 );
 
       db.produce_blocks(1, 1);
       BOOST_CHECK_EQUAL( rsf(),
          "0111111111111111111111111111111111111111111111111111111111111111"
-         "1111111111111111111111111111111111111111111111111111111111111111"
       );
-      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(127) );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(127-64) );
 
       db.produce_blocks(1, 1);
       BOOST_CHECK_EQUAL( rsf(),
          "0101111111111111111111111111111111111111111111111111111111111111"
-         "1111111111111111111111111111111111111111111111111111111111111111"
       );
-      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(126) );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(126-64) );
 
       db.produce_blocks(1, 2);
       BOOST_CHECK_EQUAL( rsf(),
          "0010101111111111111111111111111111111111111111111111111111111111"
-         "1111111111111111111111111111111111111111111111111111111111111111"
       );
-      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(124) );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(124-64) );
 
       db.produce_blocks(1, 3);
       BOOST_CHECK_EQUAL( rsf(),
          "0001001010111111111111111111111111111111111111111111111111111111"
-         "1111111111111111111111111111111111111111111111111111111111111111"
       );
-      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(121) );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(121-64) );
 
       db.produce_blocks(1, 5);
       BOOST_CHECK_EQUAL( rsf(),
          "0000010001001010111111111111111111111111111111111111111111111111"
-         "1111111111111111111111111111111111111111111111111111111111111111"
       );
-      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(116) );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(116-64) );
 
       db.produce_blocks(1, 8);
       BOOST_CHECK_EQUAL( rsf(),
          "0000000010000010001001010111111111111111111111111111111111111111"
-         "1111111111111111111111111111111111111111111111111111111111111111"
       );
-      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(108) );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(108-64) );
 
       db.produce_blocks(1, 13);
       BOOST_CHECK_EQUAL( rsf(),
          "0000000000000100000000100000100010010101111111111111111111111111"
-         "1111111111111111111111111111111111111111111111111111111111111111"
       );
-      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(95) );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(95-64) );
 
       db.produce_blocks();
       BOOST_CHECK_EQUAL( rsf(),
          "1000000000000010000000010000010001001010111111111111111111111111"
-         "1111111111111111111111111111111111111111111111111111111111111111"
       );
-      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(95) );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(95-64) );
 
       db.produce_blocks();
       BOOST_CHECK_EQUAL( rsf(),
          "1100000000000001000000001000001000100101011111111111111111111111"
-         "1111111111111111111111111111111111111111111111111111111111111111"
       );
-      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(95) );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(95-64) );
 
       db.produce_blocks();
       BOOST_CHECK_EQUAL( rsf(),
          "1110000000000000100000000100000100010010101111111111111111111111"
-         "1111111111111111111111111111111111111111111111111111111111111111"
       );
-      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(95) );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(95-64) );
 
       db.produce_blocks();
       BOOST_CHECK_EQUAL( rsf(),
          "1111000000000000010000000010000010001001010111111111111111111111"
-         "1111111111111111111111111111111111111111111111111111111111111111"
       );
-      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(95) );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(95-64) );
 
       db.produce_blocks(1, 64);
       BOOST_CHECK_EQUAL( rsf(),
          "0000000000000000000000000000000000000000000000000000000000000000"
-         "1111100000000000001000000001000001000100101011111111111111111111"
       );
-      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(31) );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(0) );
+
+      db.produce_blocks(1, 63);
+      BOOST_CHECK_EQUAL( rsf(),
+         "0000000000000000000000000000000000000000000000000000000000000001"
+      );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(1) );
 
       db.produce_blocks(1, 32);
       BOOST_CHECK_EQUAL( rsf(),
          "0000000000000000000000000000000010000000000000000000000000000000"
-         "0000000000000000000000000000000001111100000000000001000000001000"
       );
-      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(8) );
+      BOOST_CHECK_EQUAL( db.producer_participation_rate(), pct(1) );
 } FC_LOG_AND_RETHROW() }
 
+// Check that a db rewinds to the LIB after being closed and reopened
 BOOST_FIXTURE_TEST_CASE(restart_db, testing_fixture)
 { try {
       MKDB(db)
-      db.produce_blocks(10);
 
-      BOOST_CHECK_EQUAL(db.head_block_num(), 10);
+      auto lag = HOTC_PERCENT(config::ProducerCount, config::IrreversibleThresholdPercent);
+      db.produce_blocks(20);
+
+      BOOST_CHECK_EQUAL(db.head_block_num(), 20);
+      BOOST_CHECK_EQUAL(db.last_irreversible_block_num(), 20 - lag);
 
       db.close();
       db.open();
 
-      BOOST_CHECK_EQUAL(db.head_block_num(), 10);
+      // After restarting, we should have rewound to the last irreversible block.
+      BOOST_CHECK_EQUAL(db.head_block_num(), 20 - lag);
       db.produce_blocks(5);
-      BOOST_CHECK_EQUAL(db.head_block_num(), 15);
+      BOOST_CHECK_EQUAL(db.head_block_num(), 25 - lag);
 } FC_LOG_AND_RETHROW() }
 
+// Check that a db which is closed and reopened successfully syncs back with the network, including retrieving blocks
+// that it missed while it was down
 BOOST_FIXTURE_TEST_CASE(sleepy_db, testing_fixture)
 { try {
       MKDB(producer)
       MKNET(net, (producer))
-      producer.produce_blocks(10);
+
+      auto lag = HOTC_PERCENT(config::ProducerCount, config::IrreversibleThresholdPercent);
+      producer.produce_blocks(20);
 
       {
+         // The new node, sleepy, joins, syncs, disconnects
          MKDB(sleepy, sleepy)
          net.connect_database(sleepy);
-         BOOST_CHECK_EQUAL(producer.head_block_num(), 10);
-         BOOST_CHECK_EQUAL(sleepy.head_block_num(), 10);
+         BOOST_CHECK_EQUAL(producer.head_block_num(), 20);
+         BOOST_CHECK_EQUAL(sleepy.head_block_num(), 20);
 
          net.disconnect_database(sleepy);
          sleepy.close();
       }
 
+      // 5 new blocks are produced
       producer.produce_blocks(5);
-      BOOST_CHECK_EQUAL(producer.head_block_num(), 15);
+      BOOST_CHECK_EQUAL(producer.head_block_num(), 25);
 
+      // Sleepy is reborn! Check that it is now rewound to the LIB...
       MKDB(sleepy, sleepy)
-      BOOST_CHECK_EQUAL(sleepy.head_block_num(), 10);
+      BOOST_CHECK_EQUAL(sleepy.head_block_num(), 20 - lag);
 
+      // Reconnect sleepy to the network and check that it syncs up to the present
       net.connect_database(sleepy);
-      BOOST_CHECK_EQUAL(sleepy.head_block_num(), 15);
+      BOOST_CHECK_EQUAL(sleepy.head_block_num(), 25);
       BOOST_CHECK_EQUAL(sleepy.head_block_id().str(), producer.head_block_id().str());
 } FC_LOG_AND_RETHROW() }
 
+// Test reindexing the blockchain
 BOOST_FIXTURE_TEST_CASE(reindex, testing_fixture)
 { try {
       MKDB(db)
+
+      auto lag = HOTC_PERCENT(config::ProducerCount, config::IrreversibleThresholdPercent);
       db.produce_blocks(100);
+
+      BOOST_CHECK_EQUAL(db.last_irreversible_block_num(), 100 - lag);
       db.close();
-      db.reindex();
+      db.replay();
+      BOOST_CHECK_EQUAL(db.head_block_num(), 100 - lag);
       db.produce_blocks(20);
-      BOOST_CHECK_EQUAL(db.head_block_num(), 120);
+      BOOST_CHECK_EQUAL(db.head_block_num(), 120 - lag);
 } FC_LOG_AND_RETHROW() }
 
+// Test wiping a database and resyncing with an ongoing network
 BOOST_FIXTURE_TEST_CASE(wipe, testing_fixture)
 { try {
       MKDBS((db1)(db2)(db3))

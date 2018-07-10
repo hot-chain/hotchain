@@ -25,8 +25,8 @@
 #include <hotc/chain/global_property_object.hpp>
 #include <hotc/chain/node_property_object.hpp>
 #include <hotc/chain/fork_database.hpp>
-#include <hotc/chain/block_database.hpp>
 #include <hotc/chain/genesis_state.hpp>
+#include <hotc/chain/block_log.hpp>
 
 #include <chainbase/chainbase.hpp>
 #include <fc/scoped_exit.hpp>
@@ -39,15 +39,77 @@
 #include <map>
 
 namespace hotc { namespace chain {
+
+   class database;
+
+   class message_validate_context {
+      public:
+         message_validate_context( const transaction& t, const message& m )
+         :trx(t),msg(m){}
+
+         const transaction& trx;
+         const message&     msg;
+   };
+
+
+   class precondition_validate_context : public message_validate_context {
+      public:
+         precondition_validate_context( const database& d, const transaction& t, const message& m, const account_name& r )
+         :message_validate_context(t,m),receiver(r),db(d){}
+
+         const account_name& receiver;
+         const database&    db;
+   };
+
+   class apply_context : public precondition_validate_context {
+      public:
+         apply_context( database& d, const transaction& t, const message& m, const account_name& receiver )
+         :precondition_validate_context(d,t,m,receiver),mutable_db(d){}
+
+         database&    mutable_db;
+   };
+
+   typedef std::function<void( message_validate_context& )> message_validate_handler;
+   typedef std::function<void( precondition_validate_context& )>   precondition_validate_handler;
+   typedef std::function<void( apply_context& )>            apply_handler;
+
    /**
     *   @class database
     *   @brief tracks the blockchain state in an extensible manner
     */
    class database : public chainbase::database
    {
+
       public:
          database();
          ~database();
+
+         /**
+          *  This signal is emitted after all operations and virtual operation for a
+          *  block have been applied but before the get_applied_operations() are cleared.
+          *
+          *  You may not yield from this callback because the blockchain is holding
+          *  the write lock and may be in an "inconstant state" until after it is
+          *  released.
+          */
+         fc::signal<void(const signed_block&)> applied_block;
+
+         /**
+          * This signal is emitted any time a new transaction is added to the pending
+          * block state.
+          */
+         fc::signal<void(const signed_transaction&)> on_pending_transaction;
+
+
+
+         /**
+          *  The database can override any script handler with native code.
+          */
+         ///@{
+         void set_validate_handler( const account_name& contract, const message_type& action, message_validate_handler v );
+         void set_precondition_validate_handler(  const account_name& contract, const message_type& action, precondition_validate_handler v );
+         void set_apply_handler( const account_name& contract, const message_type& action, apply_handler v );
+         //@}
 
          enum validation_steps
          {
@@ -88,7 +150,7 @@ namespace hotc { namespace chain {
           * This method may be called after or instead of @ref database::open, and will rebuild the object graph by
           * replaying blockchain history. When this method exits successfully, the database will be open.
           */
-         void reindex(fc::path data_dir, uint64_t shared_file_size, const genesis_state_type& initial_allocation = genesis_state_type());
+         void replay(fc::path data_dir, uint64_t shared_file_size, const genesis_state_type& initial_allocation = genesis_state_type());
 
          /**
           * @brief wipe Delete database from disk, and potentially the raw chain as well.
@@ -128,13 +190,13 @@ namespace hotc { namespace chain {
 
          signed_block generate_block(
             const fc::time_point_sec when,
-            producer_id_type producer_id,
+            producer_id_type producer,
             const fc::ecc::private_key& block_signing_private_key,
             uint32_t skip
             );
          signed_block _generate_block(
             const fc::time_point_sec when,
-            producer_id_type producer_id,
+            producer_id_type producer,
             const fc::ecc::private_key& block_signing_private_key
             );
 
@@ -177,21 +239,8 @@ namespace hotc { namespace chain {
          void pop_block();
          void clear_pending();
 
-         /**
-          *  This signal is emitted after all operations and virtual operation for a
-          *  block have been applied but before the get_applied_operations() are cleared.
-          *
-          *  You may not yield from this callback because the blockchain is holding
-          *  the write lock and may be in an "inconstant state" until after it is
-          *  released.
-          */
-         fc::signal<void(const signed_block&)> applied_block;
 
-         /**
-          * This signal is emitted any time a new transaction is added to the pending
-          * block state.
-          */
-         fc::signal<void(const signed_transaction&)> on_pending_transaction;
+
 
          /**
           * @brief Get the producer scheduled for block production in a slot.
@@ -241,7 +290,7 @@ namespace hotc { namespace chain {
          block_id_type    head_block_id()const;
          producer_id_type head_block_producer()const;
 
-         uint32_t  block_interval( )const { return HOTC_BLOCK_INTERVAL_SEC; }
+         uint32_t  block_interval( )const { return config::BlockIntervalSeconds; }
 
          node_property_object& node_properties();
 
@@ -260,7 +309,8 @@ namespace hotc { namespace chain {
            *  This method validates transactions without adding it to the pending state.
            *  @return true if the transaction would validate
            */
-          void validate_transaction(const signed_transaction& trx);
+          void validate_transaction(const signed_transaction& trx)const;
+          void validate_tapos( const signed_transaction& trx )const;
 
        private:
           optional<session> _pending_tx_session;
@@ -272,6 +322,15 @@ namespace hotc { namespace chain {
       private:
          void _apply_block(const signed_block& next_block);
          void _apply_transaction(const signed_transaction& trx);
+
+         void validate_uniqueness( const signed_transaction& trx )const;
+         void validate_message_precondition( precondition_validate_context& c )const;
+         void apply_message( apply_context& c );
+
+
+
+         bool check_for_duplicate_transactions()const { return !(_skip_flags&skip_transaction_dupe_check); }
+         bool check_tapos()const                      { return !(_skip_flags&skip_tapos_check);            }
 
          ///Steps involved in applying a new block
          ///@{
@@ -285,26 +344,22 @@ namespace hotc { namespace chain {
          void update_last_irreversible_block();
          void clear_expired_transactions();
 
-         deque< signed_transaction >         _pending_transactions;
-         fork_database                       _fork_db;
+         deque< signed_transaction >       _pending_transactions;
+         fork_database                     _fork_db;
 
-         /**
-          *  Note: we can probably store blocks by block num rather than
-          *  block id because after the undo window is past the block ID
-          *  is no longer relevant and its number is irreversible.
-          *
-          *  During the "fork window" we can cache blocks in memory
-          *  until the fork is resolved.  This should make maintaining
-          *  the fork tree relatively simple.
-          */
-         block_database   _block_id_to_block;
+         block_log                         _block_log;
 
          bool                              _producing = false;
+         bool                              _pushing  = false;
          uint64_t                          _skip_flags = 0;
 
          flat_map<uint32_t,block_id_type>  _checkpoints;
 
          node_property_object              _node_property_object;
+
+         map< account_name, map<message_type, message_validate_handler> > message_validate_handlers;
+         map< account_name, map<message_type, precondition_validate_handler> >   precondition_validate_handlers;
+         map< account_name, map<message_type, apply_handler> >            apply_handlers;
    };
 
 } }
