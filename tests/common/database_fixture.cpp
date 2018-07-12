@@ -38,18 +38,18 @@
 
 #include "database_fixture.hpp"
 
-uint32_t HOTC_TESTING_GENESIS_TIMESTAMP = 1431700000;
+uint32_t HOTC_TESTING_GENESIS_TIMESTAMP = 1431700005;
 
 namespace hotc { namespace chain {
 
 testing_fixture::testing_fixture() {
    default_genesis_state.initial_timestamp = fc::time_point_sec(HOTC_TESTING_GENESIS_TIMESTAMP);
-   default_genesis_state.initial_producer_count = HOTC_DEFAULT_MIN_PRODUCER_COUNT;
-   for (int i = 0; i < default_genesis_state.initial_producer_count; ++i) {
+   default_genesis_state.immutable_parameters.min_producer_count = config::ProducerCount;
+   for (int i = 0; i < default_genesis_state.immutable_parameters.min_producer_count; ++i) {
       auto name = std::string("init") + fc::to_string(i);
       auto private_key = fc::ecc::private_key::regenerate(fc::sha256::hash(name));
       public_key_type public_key = private_key.get_public_key();
-      default_genesis_state.initial_accounts.emplace_back(name, public_key, public_key);
+      default_genesis_state.initial_accounts.emplace_back(name, 100000, public_key, public_key);
       key_ring[public_key] = private_key;
 
       private_key = fc::ecc::private_key::regenerate(fc::sha256::hash(name + ".producer"));
@@ -79,7 +79,7 @@ genesis_state_type&testing_fixture::genesis_state() {
 
 private_key_type testing_fixture::get_private_key(const public_key_type& public_key) const {
    auto itr = key_ring.find(public_key);
-   HOTC_ASSERT(itr != key_ring.end(), testing_exception,
+   HOTC_ASSERT(itr != key_ring.end(), missing_key_exception,
               "Private key corresponding to public key ${k} not known.", ("k", public_key));
    return itr->second;
 }
@@ -95,8 +95,8 @@ void testing_database::open() {
    database::open(data_dir, TEST_DB_SIZE, [this]{return genesis_state;});
 }
 
-void testing_database::reindex() {
-   database::reindex(data_dir, TEST_DB_SIZE, genesis_state);
+void testing_database::replay() {
+   database::replay(data_dir, TEST_DB_SIZE, genesis_state);
 }
 
 void testing_database::wipe(bool include_blocks) {
