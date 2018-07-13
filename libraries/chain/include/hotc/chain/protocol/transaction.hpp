@@ -21,80 +21,172 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include <hotc/chain/exceptions.hpp>
-#include <fc/io/raw.hpp>
-#include <fc/bitutil.hpp>
-#include <fc/smart_ref_impl.hpp>
-#include <algorithm>
+#pragma once
+#include <HOTC/chain/protocol/types.hpp>
+#include <HOTC/chain/message.hpp>
 
-namespace hotc { namespace chain {
+#include <numeric>
 
-digest_type transaction::digest()const {
-   digest_type::encoder enc;
-   fc::raw::pack( enc, *this );
-   return enc.result();
-}
+namespace HOTC { namespace chain {
 
-digest_type transaction::sig_digest( const chain_id_type& chain_id )const {
-   digest_type::encoder enc;
-   fc::raw::pack( enc, chain_id );
-   fc::raw::pack( enc, *this );
-   return enc.result();
-}
+   /**
+    * @defgroup transactions Transactions
+    *
+    * All transactions are sets of messages that must be applied atomically (all succeed or all fail). Transactions
+    * must refer to a recent block that defines the context of the operation so that they assert a known
+    * state-precondition assumed by the transaction signers.
+    *
+    * Rather than specify a full block number, we only specify the lower 16 bits of the block number which means you
+    * can reference any block within the last 65,536 blocks which is 2.2 days with a 3 second block interval.
+    *
+    * All transactions must expire so that the network does not have to maintain a permanent record of all transactions
+    * ever published. A transaction may not have an expiration date too far in the future because this would require
+    * keeping too much transaction history in memory.
+    *
+    * The block prefix is the first 4 bytes of the block hash of the reference block number, which is the second 4
+    * bytes of the @ref block_id_type (the first 4 bytes of the block ID are the block number)
+    *
+    * @note It is not recommended to set the @ref ref_block_num, @ref ref_block_prefix, and @ref expiration
+    * fields manually. Call @ref set_expiration instead.
+    *
+    * @{
+    */
 
-hotc::chain::transaction_id_type hotc::chain::transaction::id() const {
-   auto h = digest();
-   transaction_id_type result;
-   memcpy(result._hash, h._hash, std::min(sizeof(result), sizeof(h)));
-   return result;
-}
-
-const signature_type& hotc::chain::signed_transaction::sign(const private_key_type& key, const chain_id_type& chain_id) {
-   digest_type h = sig_digest( chain_id );
-   signatures.push_back(key.sign_compact(h));
-   return signatures.back();
-}
-
-signature_type hotc::chain::signed_transaction::sign(const private_key_type& key, const chain_id_type& chain_id)const {
-   digest_type::encoder enc;
-   fc::raw::pack( enc, chain_id );
-   fc::raw::pack( enc, *this );
-   return key.sign_compact(enc.result());
-}
-
-void transaction::set_expiration( fc::time_point_sec expiration_time ) {
-   expiration = expiration_time;
-}
-
-void transaction::set_reference_block( const block_id_type& reference_block ) {
-   ref_block_num = fc::endian_reverse_u32(reference_block._hash[0]);
-   ref_block_prefix = reference_block._hash[1];
-}
-
-flat_set<public_key_type> signed_transaction::get_signature_keys( const chain_id_type& chain_id )const
-{ try {
-   auto d = sig_digest( chain_id );
-   flat_set<public_key_type> result;
-   for( const auto&  sig : signatures )
+   /**
+    * @brief A transaction is a group of messages that should be applied atomically
+    *
+    * All interactions the wider world has with the blockchain take place through transactions. To interact with the
+    * blockchain, a transaction is created containing messages. The messages specify the changes to be made to the
+    * blockchain, and the authorization required to execute the transaction is determined by the messages it contains.
+    * All messages in a transaction are executed in order and atomically; i.e. if any message in a transaction is
+    * processed, all are, in order, without any other actions taking place between adjacent messages.
+    *
+    * In practice, unrelated transactions and messages may be evaluated in parallel, but it is guaranteed that this
+    * will not be done with transactions which interact with eachother or the same accounts.
+    */
+   struct transaction
    {
-      HOTC_ASSERT(
-         result.insert( fc::ecc::public_key(sig,d) ).second,
-         tx_duplicate_sig,
-         "Duplicate Signature detected" );
-   }
-   return result;
-} FC_CAPTURE_AND_RETHROW() }
+      /**
+       * Least significant 16 bits from the reference block's number
+       */
+      uint16_t ref_block_num = 0;
+      /**
+       * The first non-block-number 32-bits of the reference block's ID
+       *
+       * Recall that block IDs have 32 bits of block
+       * number followed by the actual block hash, so this field should be set using the second 32 bits in the
+       * @ref block_id_type
+       */
+      uint32_t ref_block_prefix = 0;
+      /**
+       * This field specifies the absolute expiration time for this transaction
+       */
+      fc::time_point_sec expiration;
 
-hotc::chain::digest_type hotc::chain::signed_transaction::merkle_digest() const {
-   digest_type::encoder enc;
-   fc::raw::pack(enc, *this);
-   return enc.result();
-}
+      /**
+       * The messages in this transaction
+       */
+      vector<message> messages;
 
-digest_type generated_transaction::merkle_digest() const {
-   digest_type::encoder enc;
-   fc::raw::pack(enc, *this);
-   return enc.result();
-}
+      /// Calculate the digest for a transaction
+      digest_type         digest()const;
+      transaction_id_type id()const;
+      /// Calculate the digest used for signature validation
+      digest_type         sig_digest(const chain_id_type& chain_id)const;
 
-} } // hotc::chain
+      void set_expiration(fc::time_point_sec expiration_time);
+      void set_reference_block(const block_id_type& reference_block);
+   };
+
+   /**
+    * @brief A generated_transaction is a transaction which was internally generated by the blockchain, typically as a
+    * result of running a contract.
+    *
+    * When contracts run and seek to interact with other contracts, or mutate chain state, they generate transactions
+    * containing messages which effect these interactions and mutations. These generated transactions are automatically
+    * generated by contracts, and thus are authorized by the script that generated them rather than by signatures. The
+    * generated_transaction struct records such a transaction.
+    *
+    * These transactions are generated while processing other transactions. The generated transactions are assigned a
+    * sequential ID, then stored in the block that generated them. These generated transactions can then be included in
+    * subsequent blocks by referencing this ID.
+    */
+   struct generated_transaction : public transaction {
+      generated_transaction_id_type id;
+
+      digest_type merkle_digest() const;
+   };
+
+   /**
+    * @brief A single authorization used to authorize a transaction
+    *
+    * Transactions may have several accounts that must authorize them before they may be evaluated. Each of those
+    * accounts has several different authority levels, some of which may be sufficient to authorize the transaction in
+    * question and some of which may not. This struct records an account, an the authority level on that account, that
+    * must/did authorize a transaction.
+    *
+    * Objects of this struct shall be added to a @ref signed_transaction when it is being signed, to declare that a
+    * given account/authority level has approved the transaction. These permissions will then be checked by blockchain
+    * nodes, when receiving the transaction over the network, to verify that the transaction bears signatures
+    * corresponding to all of the permissions it declares. Finally, when processing the transaction in context with
+    * blockchain state, it will be verified that the transaction declared all of the appropriate permissions.
+    */
+   struct authorization {
+      /// The account authorizing the transaction
+      account_name authorizing_account;
+      /// The privileges being invoked to authorize the transaction
+      permission_name privileges;
+   };
+
+   /**
+    * @brief A transaction with signatures
+    *
+    * signed_transaction is a transaction with an additional manifest of authorizations included with the transaction,
+    * and the signatures backing those authorizations.
+    */
+   struct signed_transaction : public transaction
+   {
+      signed_transaction(const transaction& trx = transaction())
+         : transaction(trx){}
+
+      /** signs and appends to signatures */
+      const signature_type& sign(const private_key_type& key, const chain_id_type& chain_id);
+
+      /** returns signature but does not append */
+      signature_type sign(const private_key_type& key, const chain_id_type& chain_id)const;
+
+      flat_set<public_key_type> get_signature_keys(const chain_id_type& chain_id)const;
+
+      /**
+       * @brief This is the list of signatures that are provided for this transaction
+       *
+       * These should roughly parallel @ref provided_authorizations below. It is possible that two authorizations may
+       * use the same key, however, in which case there would be a single signature for multiple authorizations.
+       */
+      vector<signature_type> signatures;
+      /**
+       * @brief This is the list of authorizations that are provided for this transaction
+       *
+       * Note that this is NOT the set of authorizations that are <i>required</i> for the transaction! The difference
+       * is subtle since for a properly authorized transaction, the provided authorizations are the required
+       * authorizations, but in practice it must be verified that the provided_authorizations are sufficient to fully
+       * authorize the transaction.
+       */
+      vector<authorization> provided_authorizations;
+
+      /**
+       * Removes all messages, signatures, and authorizations
+       */
+      void clear() { messages.clear(); signatures.clear(); provided_authorizations.clear(); }
+
+      digest_type merkle_digest()const;
+   };
+
+   /// @} transactions group
+
+} } // HOTC::chain
+
+FC_REFLECT(HOTC::chain::transaction, (ref_block_num)(ref_block_prefix)(expiration)(messages))
+FC_REFLECT(HOTC::chain::generated_transaction, (id))
+FC_REFLECT(HOTC::chain::authorization, (authorizing_account)(privileges))
+FC_REFLECT_DERIVED(HOTC::chain::signed_transaction, (HOTC::chain::transaction), (signatures))

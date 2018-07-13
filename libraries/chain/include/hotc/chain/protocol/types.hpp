@@ -38,12 +38,13 @@
 #include <fc/static_variant.hpp>
 #include <fc/smart_ref_fwd.hpp>
 #include <fc/crypto/ripemd160.hpp>
+#include <fc/fixed_string.hpp>
 
 #include <memory>
 #include <vector>
 #include <deque>
 #include <cstdint>
-#include <hotc/chain/protocol/config.hpp>
+#include <HOTC/chain/protocol/config.hpp>
 
 #include <chainbase/chainbase.hpp>
 
@@ -63,7 +64,7 @@
     { c(*this); }
 #define OBJECT_CTOR(...) BOOST_PP_OVERLOAD(OBJECT_CTOR, __VA_ARGS__)(__VA_ARGS__)
 
-namespace hotc { namespace chain {
+namespace HOTC { namespace chain {
    using                               std::map;
    using                               std::vector;
    using                               std::unordered_map;
@@ -104,9 +105,12 @@ namespace hotc { namespace chain {
    using private_key_type = fc::ecc::private_key;
    using chain_id_type = fc::sha256;
 
-   using account_name = std::string;
-   using message_type = std::string;
-   using privilege_class = std::string;
+   typedef fc::fixed_string<>      account_name;
+   typedef fc::fixed_string<>      permission_name;
+   typedef fc::fixed_string<>      message_type;
+   //using account_name    = std::string;
+   //using message_type    = std::string;
+   //using permission_name = std::string;
 
    /**
     * List all object types from all namespaces here so they can
@@ -169,21 +173,21 @@ namespace hotc { namespace chain {
    };
 
    
-} }  // hotc::chain
+} }  // HOTC::chain
 
 namespace fc
 {
-    void to_variant( const hotc::chain::public_key_type& var,  fc::variant& vo );
-    void from_variant( const fc::variant& var,  hotc::chain::public_key_type& vo );
+    void to_variant( const HOTC::chain::public_key_type& var,  fc::variant& vo );
+    void from_variant( const fc::variant& var,  HOTC::chain::public_key_type& vo );
 }
 
-FC_REFLECT( hotc::chain::public_key_type, (key_data) )
-FC_REFLECT( hotc::chain::public_key_type::binary_key, (data)(check) )
+FC_REFLECT( HOTC::chain::public_key_type, (key_data) )
+FC_REFLECT( HOTC::chain::public_key_type::binary_key, (data)(check) )
 
-FC_REFLECT(hotc::chain::account_id_type, (_id))
-FC_REFLECT(hotc::chain::producer_id_type, (_id))
+FC_REFLECT(HOTC::chain::account_id_type, (_id))
+FC_REFLECT(HOTC::chain::producer_id_type, (_id))
 
-FC_REFLECT_ENUM( hotc::chain::object_type,
+FC_REFLECT_ENUM( HOTC::chain::object_type,
                  (null_object_type)
                  (account_object_type)
                  (permission_object_type)
@@ -197,4 +201,4 @@ FC_REFLECT_ENUM( hotc::chain::object_type,
                  (chain_property_object_type)
                  (OBJECT_TYPE_COUNT)
                )
-FC_REFLECT( hotc::chain::void_t, )
+FC_REFLECT( HOTC::chain::void_t, )

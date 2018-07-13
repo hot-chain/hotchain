@@ -24,18 +24,18 @@
 
 #include <boost/test/unit_test.hpp>
 
-#include <hotc/chain/database.hpp>
-#include <hotc/chain/exceptions.hpp>
-#include <hotc/chain/account_object.hpp>
-#include <hotc/chain/sys_contract.hpp>
+#include <HOTC/chain/database.hpp>
+#include <HOTC/chain/exceptions.hpp>
+#include <HOTC/chain/account_object.hpp>
+#include <HOTC/chain/sys_contract.hpp>
 
-#include <hotc/utilities/tempdir.hpp>
+#include <HOTC/utilities/tempdir.hpp>
 
 #include <fc/crypto/digest.hpp>
 
 #include "../common/database_fixture.hpp"
 
-using namespace hotc;
+using namespace HOTC;
 using namespace chain;
 
 BOOST_AUTO_TEST_SUITE(block_tests)
@@ -71,10 +71,10 @@ BOOST_FIXTURE_TEST_CASE(transfer, testing_fixture)
       trx.messages[0].sender = "init1";
       trx.messages[0].recipient = "sys";
       trx.messages[0].type = "Transfer";
-      trx.messages[0].set( "Transfer", hotc::chain::Transfer{ "init1", "init2", 100, "memo" } );
+      trx.messages[0].set( "Transfer", HOTC::chain::Transfer{ "init2", 100, "memo" } );
       BOOST_REQUIRE_THROW( db.push_transaction(trx), fc::assert_exception ); // "fail to notify receiver, init2"
       trx.messages[0].notify = {"init2"};
-      trx.messages[0].set( "Transfer", hotc::chain::Transfer{ "init1", "init2", 100, "memo" } );
+      trx.messages[0].set( "Transfer", HOTC::chain::Transfer{ "init2", 100, "memo" } );
       db.push_transaction(trx);
 
       BOOST_CHECK_EQUAL( db.get_account( "init1" ).balance, 100000 - 100 );
@@ -402,4 +402,3 @@ BOOST_FIXTURE_TEST_CASE(wipe, testing_fixture)
 } FC_LOG_AND_RETHROW() }
 
 BOOST_AUTO_TEST_SUITE_END()
-

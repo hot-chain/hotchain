@@ -22,23 +22,23 @@
  * THE SOFTWARE.
  */
 #pragma once
-#include <hotc/chain/global_property_object.hpp>
-#include <hotc/chain/node_property_object.hpp>
-#include <hotc/chain/fork_database.hpp>
-#include <hotc/chain/genesis_state.hpp>
-#include <hotc/chain/block_log.hpp>
+#include <HOTC/chain/global_property_object.hpp>
+#include <HOTC/chain/node_property_object.hpp>
+#include <HOTC/chain/fork_database.hpp>
+#include <HOTC/chain/genesis_state.hpp>
+#include <HOTC/chain/block_log.hpp>
 
 #include <chainbase/chainbase.hpp>
 #include <fc/scoped_exit.hpp>
 #include <fc/signals.hpp>
 
-#include <hotc/chain/protocol/protocol.hpp>
+#include <HOTC/chain/protocol/protocol.hpp>
 
 #include <fc/log/logger.hpp>
 
 #include <map>
 
-namespace hotc { namespace chain {
+namespace HOTC { namespace chain {
 
    class database;
 
@@ -106,9 +106,9 @@ namespace hotc { namespace chain {
           *  The database can override any script handler with native code.
           */
          ///@{
-         void set_validate_handler( const account_name& contract, const message_type& action, message_validate_handler v );
-         void set_precondition_validate_handler(  const account_name& contract, const message_type& action, precondition_validate_handler v );
-         void set_apply_handler( const account_name& contract, const message_type& action, apply_handler v );
+         void set_validate_handler( const account_name& contract, const account_name& scope, const message_type& action, message_validate_handler v );
+         void set_precondition_validate_handler(  const account_name& contract, const account_name& scope, const message_type& action, precondition_validate_handler v );
+         void set_apply_handler( const account_name& contract, const account_name& scope, const message_type& action, apply_handler v );
          //@}
 
          enum validation_steps
@@ -302,6 +302,7 @@ namespace hotc { namespace chain {
          /// Reset the object graph in-memory
          void initialize_indexes();
          void init_genesis(const genesis_state_type& genesis_state = genesis_state_type());
+         void init_sys_contract(); ///< defined insys_contract.cpp
 
          void debug_dump();
          void apply_debug_updates();
@@ -362,9 +363,10 @@ namespace hotc { namespace chain {
 
          node_property_object              _node_property_object;
 
-         map< account_name, map<message_type, message_validate_handler> > message_validate_handlers;
-         map< account_name, map<message_type, precondition_validate_handler> >   precondition_validate_handlers;
-         map< account_name, map<message_type, apply_handler> >            apply_handlers;
+         typedef pair<account_name,message_type> handler_key;
+         map< account_name, map<handler_key, message_validate_handler> >        message_validate_handlers;
+         map< account_name, map<handler_key, precondition_validate_handler> >   precondition_validate_handlers;
+         map< account_name, map<handler_key, apply_handler> >                   apply_handlers;
    };
 
 } }

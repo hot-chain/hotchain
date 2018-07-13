@@ -22,11 +22,23 @@
  * THE SOFTWARE.
  */
 #pragma once
-#include <hotc/chain/protocol/types.hpp>
+#include <HOTC/chain/protocol/types.hpp>
+#include <HOTC/chain/protocol/authority.hpp>
 
 #include "multi_index_includes.hpp"
 
-namespace hotc { namespace chain {
+namespace HOTC { namespace chain {
+
+   class shared_authority {
+      shared_authority( chainbase::allocator<char> alloc )
+      :accounts(alloc),keys(alloc)
+      {}
+
+      uint32_t                         threshold = 0;
+      shared_vector<PermissionLevel>   accounts;
+      shared_vector<KeyPermission>     keys;
+   };
+   
    class account_object : public chainbase::object<account_object_type, account_object>
    {
       OBJECT_CTOR(account_object, (name))
@@ -168,14 +180,14 @@ namespace hotc { namespace chain {
       >
    >;
 
-} } // hotc::chain
+} } // HOTC::chain
 
-CHAINBASE_SET_INDEX_TYPE(hotc::chain::account_object, hotc::chain::account_index)
-CHAINBASE_SET_INDEX_TYPE(hotc::chain::permission_object, hotc::chain::permission_index)
-CHAINBASE_SET_INDEX_TYPE(hotc::chain::action_code_object, hotc::chain::action_code_index)
-CHAINBASE_SET_INDEX_TYPE(hotc::chain::action_permission_object, hotc::chain::action_permission_index)
+CHAINBASE_SET_INDEX_TYPE(HOTC::chain::account_object, HOTC::chain::account_index)
+CHAINBASE_SET_INDEX_TYPE(HOTC::chain::permission_object, HOTC::chain::permission_index)
+CHAINBASE_SET_INDEX_TYPE(HOTC::chain::action_code_object, HOTC::chain::action_code_index)
+CHAINBASE_SET_INDEX_TYPE(HOTC::chain::action_permission_object, HOTC::chain::action_permission_index)
 
-FC_REFLECT(hotc::chain::account_object, (id)(name)(balance)(votes)(converting_votes)(last_vote_conversion) )
-FC_REFLECT(hotc::chain::permission_object, (id)(owner)(parent)(name) )
-FC_REFLECT(hotc::chain::action_code_object, (id)(scope)(permission)(action)(validate_action)(validate_precondition)(apply) )
-FC_REFLECT(hotc::chain::action_permission_object, (id)(owner)(owner_permission)(scope_permission) )
+FC_REFLECT(HOTC::chain::account_object, (id)(name)(balance)(votes)(converting_votes)(last_vote_conversion) )
+FC_REFLECT(HOTC::chain::permission_object, (id)(owner)(parent)(name) )
+FC_REFLECT(HOTC::chain::action_code_object, (id)(scope)(permission)(action)(validate_action)(validate_precondition)(apply) )
+FC_REFLECT(HOTC::chain::action_permission_object, (id)(owner)(owner_permission)(scope_permission) )
