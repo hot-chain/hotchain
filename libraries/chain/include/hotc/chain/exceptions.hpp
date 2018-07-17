@@ -36,13 +36,13 @@
 #define HOTC_DECLARE_OP_BASE_EXCEPTIONS( op_name )                \
    FC_DECLARE_DERIVED_EXCEPTION(                                      \
       op_name ## _validate_exception,                                 \
-      hotc::chain::operation_validate_exception,                  \
+      hotc::chain::message_validate_exception,                  \
       3040000 + 100 * operation::tag< op_name ## _operation >::value, \
       #op_name "_operation validation exception"                      \
       )                                                               \
    FC_DECLARE_DERIVED_EXCEPTION(                                      \
       op_name ## _evaluate_exception,                                 \
-      hotc::chain::operation_evaluate_exception,                  \
+      hotc::chain::message_evaluate_exception,                  \
       3050000 + 100 * operation::tag< op_name ## _operation >::value, \
       #op_name "_operation evaluation exception"                      \
       )
@@ -71,12 +71,14 @@ namespace hotc { namespace chain {
    FC_DECLARE_DERIVED_EXCEPTION( database_query_exception,          hotc::chain::chain_exception, 3010000, "database query exception" )
    FC_DECLARE_DERIVED_EXCEPTION( block_validate_exception,          hotc::chain::chain_exception, 3020000, "block validation exception" )
    FC_DECLARE_DERIVED_EXCEPTION( transaction_exception,             hotc::chain::chain_exception, 3030000, "transaction validation exception" )
-   FC_DECLARE_DERIVED_EXCEPTION( operation_validate_exception,      hotc::chain::chain_exception, 3040000, "operation validation exception" )
-   FC_DECLARE_DERIVED_EXCEPTION( operation_evaluate_exception,      hotc::chain::chain_exception, 3050000, "operation evaluation exception" )
-   FC_DECLARE_DERIVED_EXCEPTION( utility_exception,                 hotc::chain::chain_exception, 3060000, "utility method exception" )
-   FC_DECLARE_DERIVED_EXCEPTION( undo_database_exception,           hotc::chain::chain_exception, 3070000, "undo database exception" )
-   FC_DECLARE_DERIVED_EXCEPTION( unlinkable_block_exception,        hotc::chain::chain_exception, 3080000, "unlinkable block" )
-   FC_DECLARE_DERIVED_EXCEPTION( black_swan_exception,              hotc::chain::chain_exception, 3090000, "black swan" )
+   FC_DECLARE_DERIVED_EXCEPTION( message_validate_exception,        hotc::chain::chain_exception, 3040000, "message validation exception" )
+   FC_DECLARE_DERIVED_EXCEPTION( message_precondition_exception,    hotc::chain::chain_exception, 3050000, "message precondition exception" )
+   FC_DECLARE_DERIVED_EXCEPTION( message_evaluate_exception,        hotc::chain::chain_exception, 3060000, "message evaluation exception" )
+   FC_DECLARE_DERIVED_EXCEPTION( utility_exception,                 hotc::chain::chain_exception, 3070000, "utility method exception" )
+   FC_DECLARE_DERIVED_EXCEPTION( undo_database_exception,           hotc::chain::chain_exception, 3080000, "undo database exception" )
+   FC_DECLARE_DERIVED_EXCEPTION( unlinkable_block_exception,        hotc::chain::chain_exception, 3090000, "unlinkable block" )
+   FC_DECLARE_DERIVED_EXCEPTION( black_swan_exception,              hotc::chain::chain_exception, 3100000, "black swan" )
+   FC_DECLARE_DERIVED_EXCEPTION( unknown_block_exception,           hotc::chain::chain_exception, 3110000, "unknown block" )
 
    FC_DECLARE_DERIVED_EXCEPTION( tx_missing_active_auth,            hotc::chain::transaction_exception, 3030001, "missing required active authority" )
    FC_DECLARE_DERIVED_EXCEPTION( tx_missing_owner_auth,             hotc::chain::transaction_exception, 3030002, "missing required owner authority" )
@@ -119,7 +121,6 @@ namespace hotc { namespace chain {
    FC_DECLARE_DERIVED_EXCEPTION( invalid_committee_member_signee,           hotc::chain::chain_exception, 30021, "invalid committee_member signee" )
    FC_DECLARE_DERIVED_EXCEPTION( failed_checkpoint_verification,    hotc::chain::chain_exception, 30022, "failed checkpoint verification" )
    FC_DECLARE_DERIVED_EXCEPTION( wrong_chain_id,                    hotc::chain::chain_exception, 30023, "wrong chain id" )
-   FC_DECLARE_DERIVED_EXCEPTION( unknown_block,                     hotc::chain::chain_exception, 30024, "unknown block" )
    FC_DECLARE_DERIVED_EXCEPTION( block_older_than_undo_history,     hotc::chain::chain_exception, 30025, "block is older than our undo history allows us to process" )
 
    FC_DECLARE_EXCEPTION( evaluation_error, 31000, "Evaluation Error" )

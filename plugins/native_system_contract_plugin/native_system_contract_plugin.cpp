@@ -3,22 +3,20 @@
 #include <hotc/chain/account_object.hpp>
 #include <hotc/chain/exceptions.hpp>
 
-namespace hotc_hotc {
+namespace hotc {
 using namespace chain;
 
-void Transfer_validate(chain::message_validate_context& context) {
+void Transfer_validate(chain::message_validate_context& context, database& db) {
    auto transfer = context.msg.as<Transfer>();
-   HOTC_HOTC_ASSERT(context.msg.has_notify(transfer.to), message_validate_exception, "Must notify recipient of transfer");
+   HOTC_ASSERT(context.msg.has_notify(transfer.to), message_validate_exception, "Must notify recipient of transfer");
 }
-void Transfer_validate_preconditions(chain::precondition_validate_context& context) {
-   const auto& db = context.db;
+void Transfer_validate_preconditions(chain::precondition_validate_context& context, database& db) {
    auto transfer = context.msg.as<Transfer>();
    const auto& from = db.get_account(context.msg.sender);
-   HOTC_HOTC_ASSERT(from.balance > transfer.amount, message_precondition_exception, "Insufficient Funds",
+   HOTC_ASSERT(from.balance > transfer.amount, message_precondition_exception, "Insufficient Funds",
               ("from.balance",from.balance)("transfer.amount",transfer.amount));
 }
-void Transfer_apply(chain::apply_context& context) {
-   auto& db = context.mutable_db;
+void Transfer_apply(chain::apply_context& context, database& db) {
    auto transfer = context.msg.as<Transfer>();
    const auto& from = db.get_account(context.msg.sender);
    const auto& to = db.get_account(transfer.to);
@@ -57,11 +55,11 @@ void native_system_contract_plugin::plugin_shutdown() {
 void native_system_contract_plugin::install(database& db) {
 #define SET_HANDLERS(name) \
    db.set_validate_handler("sys", "sys", #name, \
-   [&db](chain::message_validate_context& c) mutable { name ## _validate(c); }); \
+   [&db](chain::message_validate_context& c) mutable { name ## _validate(c, db); }); \
    db.set_precondition_validate_handler("sys", "sys", #name, \
-   [&db](chain::precondition_validate_context& c) mutable { name ## _validate_preconditions(c); }); \
+   [&db](chain::precondition_validate_context& c) mutable { name ## _validate_preconditions(c, db); }); \
    db.set_apply_handler("sys", "sys", #name, \
-   [&db](chain::apply_context& c) mutable { name ## _apply(c); })
+   [&db](chain::apply_context& c) mutable { name ## _apply(c, db); })
 
    SET_HANDLERS(Transfer);
 }

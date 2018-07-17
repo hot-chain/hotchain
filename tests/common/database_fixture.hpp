@@ -23,10 +23,12 @@
  */
 #pragma once
 
-#include <hotc/app/application.hpp>
 #include <hotc/chain/database.hpp>
 #include <hotc/chain/producer_object.hpp>
+#include <hotc/chain/exceptions.hpp>
+
 #include <hotc/utilities/tempdir.hpp>
+
 #include <fc/io/json.hpp>
 #include <fc/smart_ref_impl.hpp>
 #include <fc/signals.hpp>
@@ -39,10 +41,6 @@
 using namespace hotc::chain;
 
 extern uint32_t HOTC_TESTING_GENESIS_TIMESTAMP;
-
-namespace hotc { namespace chain {
-FC_DECLARE_EXCEPTION(testing_exception, 6000000, "test framework exception")
-} }
 
 #define TEST_DB_SIZE (1024*1024*10)
 
@@ -83,6 +81,8 @@ FC_DECLARE_EXCEPTION(testing_exception, 6000000, "test framework exception")
 }
 
 namespace hotc { namespace chain {
+FC_DECLARE_EXCEPTION(testing_exception, 6000000, "test framework exception")
+FC_DECLARE_DERIVED_EXCEPTION(missing_key_exception, hotc::chain::testing_exception, 6010000, "key could not be found")
 
 /**
  * @brief The testing_fixture class provides various services relevant to testing the database.
@@ -144,7 +144,7 @@ public:
    /**
     * @brief Reindex the database using the boilerplate testing database settings
     */
-   void reindex();
+   void replay();
    /**
     * @brief Wipe the database using the boilerplate testing database settings
     * @param include_blocks If true, the blocks will be removed as well; otherwise, only the database will be wiped and
@@ -242,11 +242,10 @@ public:
     * @brief Send a block to all databases in this network
     * @param block The block to send
     */
-   void propagate_block(const signed_block& block);
+   void propagate_block(const signed_block& block, const testing_database& skip_db);
 
 protected:
    std::map<testing_database*, fc::scoped_connection> databases;
-   bool currently_propagating_block = false;
 };
 
 /// Some helpful macros to reduce boilerplate when making a testing_network and connecting some testing_databases @{

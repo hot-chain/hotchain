@@ -1,11 +1,10 @@
 
-file(GLOB HEADERS "include/HOTC/chain/*.hpp")
-file(GLOB PROTOCOL_HEADERS "include/HOTC/chain/protocol/*.hpp")
+file(GLOB HEADERS "include/hotc/chain/*.hpp")
+file(GLOB PROTOCOL_HEADERS "include/hotc/chain/protocol/*.hpp")
 
 ## SORT .cpp by most likely to change / break compile
-add_library( HOTC_chain
+add_library( hotc_chain
              database.cpp
-             sys_contract.cpp
              fork_database.cpp
 
              protocol/types.cpp
@@ -21,8 +20,8 @@ add_library( HOTC_chain
              ${PROTOCOL_HEADERS}
            )
 
-target_link_libraries( HOTC_chain fc chainbase )
-target_include_directories( HOTC_chain
+target_link_libraries( hotc_chain fc chainbase )
+target_include_directories( hotc_chain
                             PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" )
 
 if(MSVC)
@@ -30,11 +29,11 @@ if(MSVC)
 endif(MSVC)
 
 INSTALL( TARGETS
-   HOTC_chain
+   hotc_chain
 
    RUNTIME DESTINATION bin
    LIBRARY DESTINATION lib
    ARCHIVE DESTINATION lib
 )
-INSTALL( FILES ${HEADERS} DESTINATION "include/HOTC/chain" )
-INSTALL( FILES ${PROTOCOL_HEADERS} DESTINATION "include/HOTC/chain/protocol" )
+INSTALL( FILES ${HEADERS} DESTINATION "include/hotc/chain" )
+INSTALL( FILES ${PROTOCOL_HEADERS} DESTINATION "include/hotc/chain/protocol" )
