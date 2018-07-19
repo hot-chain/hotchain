@@ -189,3 +189,4 @@ namespace hotc { namespace chain {
       { throw( effect_type( e.what(), e.get_log() ) ); }
 
 } } // hotc::chain
+

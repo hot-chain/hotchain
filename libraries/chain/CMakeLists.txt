@@ -37,3 +37,5 @@ INSTALL( TARGETS
 )
 INSTALL( FILES ${HEADERS} DESTINATION "include/hotc/chain" )
 INSTALL( FILES ${PROTOCOL_HEADERS} DESTINATION "include/hotc/chain/protocol" )
+
+
