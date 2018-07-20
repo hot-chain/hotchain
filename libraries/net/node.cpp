@@ -80,6 +80,8 @@
 
 #include <hotc/chain/config.hpp>
 
+#include <appbase/application.hpp>
+
 #include <fc/git_revision.hpp>
 
 //#define ENABLE_DEBUG_ULOGS
@@ -139,13 +141,13 @@ namespace hotc { namespace net {
 
         // for network performance stats
         message_propagation_data propagation_data;
-        fc::uint160_t     message_contents_hash; // hash of whatever the message contains (if it's a transaction, this is the transaction id, if it's a block, it's the block_id)
+        fc::uint256       message_contents_hash; // hash of whatever the message contains (if it's a transaction, this is the transaction id, if it's a block, it's the block_id)
 
         message_info( const message_hash_type& message_hash,
                       const message&           message_body,
                       uint32_t                 block_clock_when_received,
                       const message_propagation_data& propagation_data,
-                      fc::uint160_t            message_contents_hash ) :
+                      fc::uint256              message_contents_hash ) :
           message_hash( message_hash ),
           message_body( message_body ),
           block_clock_when_received( block_clock_when_received ),
@@ -158,7 +160,7 @@ namespace hotc { namespace net {
             bmi::indexed_by< bmi::ordered_unique< bmi::tag<message_hash_index>,
                                                   bmi::member<message_info, message_hash_type, &message_info::message_hash> >,
                              bmi::ordered_non_unique< bmi::tag<message_contents_hash_index>,
-                                                      bmi::member<message_info, fc::uint160_t, &message_info::message_contents_hash> >,
+                                                      bmi::member<message_info, fc::uint256, &message_info::message_contents_hash> >,
                              bmi::ordered_non_unique< bmi::tag<block_clock_index>,
                                                       bmi::member<message_info, uint32_t, &message_info::block_clock_when_received> > >
         > message_cache_container;
@@ -172,10 +174,10 @@ namespace hotc { namespace net {
         block_clock( 0 )
       {}
       void block_accepted();
-      void cache_message( const message& message_to_cache, const message_hash_type& hash_of_message_to_cache,
-                        const message_propagation_data& propagation_data, const fc::uint160_t& message_content_hash );
+      void cache_message(const message& message_to_cache, const message_hash_type& hash_of_message_to_cache,
+                         const message_propagation_data& propagation_data, const fc::uint256& message_content_hash);
       message get_message( const message_hash_type& hash_of_message_to_lookup );
-      message_propagation_data get_message_propagation_data( const fc::uint160_t& hash_of_message_contents_to_lookup ) const;
+      message_propagation_data get_message_propagation_data( const fc::sha256& hash_of_message_contents_to_lookup ) const;
       size_t size() const { return _message_cache.size(); }
     };
 
@@ -187,16 +189,16 @@ namespace hotc { namespace net {
                                                       _message_cache.get<block_clock_index>().lower_bound(block_clock - cache_duration_in_blocks ) );
     }
 
-    void blockchain_tied_message_cache::cache_message( const message& message_to_cache,
-                                                     const message_hash_type& hash_of_message_to_cache,
-                                                     const message_propagation_data& propagation_data,
-                                                     const fc::uint160_t& message_content_hash )
+    void blockchain_tied_message_cache::cache_message(const message& message_to_cache,
+                                                      const message_hash_type& hash_of_message_to_cache,
+                                                      const message_propagation_data& propagation_data,
+                                                      const fc::uint256& message_content_hash)
     {
-      _message_cache.insert( message_info(hash_of_message_to_cache,
+      _message_cache.insert(message_info(hash_of_message_to_cache,
                                          message_to_cache,
                                          block_clock,
                                          propagation_data,
-                                         message_content_hash ) );
+                                         message_content_hash));
     }
 
     message blockchain_tied_message_cache::get_message( const message_hash_type& hash_of_message_to_lookup )
@@ -208,9 +210,9 @@ namespace hotc { namespace net {
       FC_THROW_EXCEPTION(  fc::key_not_found_exception, "Requested message not in cache" );
     }
 
-    message_propagation_data blockchain_tied_message_cache::get_message_propagation_data( const fc::uint160_t& hash_of_message_contents_to_lookup ) const
+    message_propagation_data blockchain_tied_message_cache::get_message_propagation_data( const fc::sha256& hash_of_message_contents_to_lookup ) const
     {
-      if( hash_of_message_contents_to_lookup != fc::uint160_t() )
+      if( hash_of_message_contents_to_lookup != fc::sha256() )
       {
         message_cache_container::index<message_contents_hash_index>::type::const_iterator iter =
            _message_cache.get<message_contents_hash_index>().find(hash_of_message_contents_to_lookup );
@@ -382,7 +384,7 @@ namespace hotc { namespace net { namespace detail {
 
       bool has_item( const net::item_id& id ) override;
       void handle_message( const message& ) override;
-      bool handle_block( const hotc::net::block_message& block_message, bool sync_mode, std::vector<fc::uint160_t>& contained_transaction_message_ids ) override;
+      bool handle_block( const hotc::net::block_message& block_message, bool sync_mode, std::vector<fc::sha256>& contained_transaction_message_ids ) override;
       void handle_transaction( const hotc::net::trx_message& transaction_message ) override;
       std::vector<item_hash_t> get_block_ids(const std::vector<item_hash_t>& blockchain_synopsis,
                                              uint32_t& remaining_item_count,
@@ -801,7 +803,7 @@ namespace hotc { namespace net { namespace detail {
       _suspend_fetching_sync_blocks(false),
       _items_to_fetch_updated(false),
       _items_to_fetch_sequence_counter(0),
-      _recent_block_interval_in_seconds(HOTC_MAX_BLOCK_INTERVAL),
+      _recent_block_interval_in_seconds(config::BlockIntervalSeconds),
       _user_agent_string(user_agent),
       _desired_number_of_connections(HOTC_NET_DEFAULT_DESIRED_CONNECTIONS),
       _maximum_number_of_connections(HOTC_NET_DEFAULT_MAX_CONNECTIONS),
@@ -972,10 +974,6 @@ namespace hotc { namespace net { namespace detail {
         catch (const fc::canceled_exception&)
         {
           throw;
-        }
-        catch (const fc::exception& e)
-        {
-          elog("${e}", ("e", e));
         }
         FC_CAPTURE_AND_LOG( () )
       }// while(!canceled)
@@ -2282,7 +2280,7 @@ namespace hotc { namespace net { namespace detail {
 
       if (!originating_peer->peer_needs_sync_items_from_us)
       {
-        dlog("sync: peer is already in sync with us");
+        dlog("sync: peer is already in sync with us ${p}", ("p", originating_peer->we_need_sync_items_from_peer));
         // if we thought we had all the items this peer had, but now it turns out that we don't
         // have the last item it requested to send from,
         // we need to kick off another round of synchronization
@@ -2639,7 +2637,7 @@ namespace hotc { namespace net { namespace detail {
         // they must be an attacker or have a buggy client.
         fc::time_point_sec minimum_time_of_last_offered_block =
             originating_peer->last_block_time_delegate_has_seen + // timestamp of the block immediately before the first unfetched block
-            originating_peer->number_of_unfetched_item_ids * HOTC_MIN_BLOCK_INTERVAL;
+            originating_peer->number_of_unfetched_item_ids * config::BlockIntervalSeconds;
         fc::time_point_sec now = fc::time_point::now();
         if (minimum_time_of_last_offered_block > now + HOTC_NET_FUTURE_SYNC_BLOCKS_GRACE_PERIOD_SEC)
         {
@@ -3018,7 +3016,7 @@ namespace hotc { namespace net { namespace detail {
 
       try
       {
-        std::vector<fc::uint160_t> contained_transaction_message_ids;
+        std::vector<fc::sha256> contained_transaction_message_ids;
         _delegate->handle_block(block_message_to_send, true, contained_transaction_message_ids);
         ilog("Successfully pushed sync block ${num} (id:${id})",
              ("num", block_message_to_send.block.block_num())
@@ -3336,7 +3334,7 @@ namespace hotc { namespace net { namespace detail {
         if (std::find(_most_recent_blocks_accepted.begin(), _most_recent_blocks_accepted.end(),
                       block_message_to_process.block_id) == _most_recent_blocks_accepted.end())
         {
-          std::vector<fc::uint160_t> contained_transaction_message_ids;
+          std::vector<fc::sha256> contained_transaction_message_ids;
           _delegate->handle_block(block_message_to_process, false, contained_transaction_message_ids);
           message_validated_time = fc::time_point::now();
           ilog("Successfully pushed block ${num} (id:${id})",
@@ -4856,7 +4854,7 @@ namespace hotc { namespace net { namespace detail {
     void node_impl::broadcast( const message& item_to_broadcast, const message_propagation_data& propagation_data )
     {
       VERIFY_CORRECT_THREAD();
-      fc::uint160_t hash_of_message_contents;
+      fc::uint256 hash_of_message_contents;
       if( item_to_broadcast.msg_type == hotc::net::block_message_type )
       {
         hotc::net::block_message block_message_to_broadcast = item_to_broadcast.as<hotc::net::block_message>();
@@ -5254,7 +5252,7 @@ namespace hotc { namespace net { namespace detail {
           destination_node->delegate->handle_transaction(message_to_deliver.as<trx_message>());
         else if (message_to_deliver.msg_type == block_message_type)
         {
-          std::vector<fc::uint160_t> contained_transaction_message_ids;
+          std::vector<fc::sha256> contained_transaction_message_ids;
           destination_node->delegate->handle_block(message_to_deliver.as<block_message>(), false, contained_transaction_message_ids);
         }
         else
@@ -5329,6 +5327,38 @@ namespace hotc { namespace net { namespace detail {
       return statistics;
     }
 
+    template<typename T>
+    struct invoke_in_appbase {
+       template<typename Lambda>
+       T operator()( Lambda&& l )const {
+          typename fc::promise<T>::ptr p(new fc::promise<T>( "invoke in appbase" ));
+          appbase::app().get_io_service().post( [&](){
+             try {
+                p->set_value( l() );
+             } catch ( const fc::exception& e ) {
+                p->set_exception( e.dynamic_copy_exception() );
+             }
+           } );
+           return p->wait();
+       }
+    };
+    template<>
+    struct invoke_in_appbase<void> {
+       template<typename Lambda>
+       void operator()( Lambda&& l )const {
+          fc::promise<void>::ptr p(new fc::promise<void>( "invoke in appbase" ));
+              appbase::app().get_io_service().post( [&](){
+             try {
+                l();
+                p->set_value();
+             } catch ( const fc::exception& e ) {
+                p->set_exception( e.dynamic_copy_exception() );
+             }
+           } );
+           p->wait();
+       }
+    };
+
 // define VERBOSE_NODE_DELEGATE_LOGGING to log whenever the node delegate throws exceptions
 //#define VERBOSE_NODE_DELEGATE_LOGGING
 #ifdef VERBOSE_NODE_DELEGATE_LOGGING
@@ -5367,22 +5397,25 @@ namespace hotc { namespace net { namespace detail {
     }
 #else
 #  define INVOKE_AND_COLLECT_STATISTICS(method_name, ...) \
-    call_statistics_collector statistics_collector(#method_name, \
-                                                   &_ ## method_name ## _execution_accumulator, \
-                                                   &_ ## method_name ## _delay_before_accumulator, \
-                                                   &_ ## method_name ## _delay_after_accumulator); \
-    if (_thread->is_current()) \
-    { \
-      call_statistics_collector::actual_execution_measurement_helper helper(statistics_collector); \
-      return _node_delegate->method_name(__VA_ARGS__); \
-    } \
-    else \
-      return _thread->async([&](){ \
-        call_statistics_collector::actual_execution_measurement_helper helper(statistics_collector); \
-        return _node_delegate->method_name(__VA_ARGS__); \
-      }, "invoke " BOOST_STRINGIZE(method_name)).wait()
-#endif
+   call_statistics_collector statistics_collector(#method_name, \
+                                                  &_ ## method_name ## _execution_accumulator, \
+                                                  &_ ## method_name ## _delay_before_accumulator, \
+                                                  &_ ## method_name ## _delay_after_accumulator); \
+   if (_thread->is_current()) \
+   { \
+     call_statistics_collector::actual_execution_measurement_helper helper(statistics_collector); \
+     return _node_delegate->method_name(__VA_ARGS__); \
+   } \
+   else \
+   { \
+      using T = decltype( _node_delegate->method_name(__VA_ARGS__) ); \
+      return invoke_in_appbase<T>()( [&]() mutable { \
+         call_statistics_collector::actual_execution_measurement_helper helper(statistics_collector); \
+         return _node_delegate->method_name(__VA_ARGS__); \
+      }); \
+   }
 
+#endif
     bool statistics_gathering_node_delegate_wrapper::has_item( const net::item_id& id )
     {
       INVOKE_AND_COLLECT_STATISTICS(has_item, id);
@@ -5393,7 +5426,7 @@ namespace hotc { namespace net { namespace detail {
       INVOKE_AND_COLLECT_STATISTICS(handle_message, message_to_handle);
     }
 
-    bool statistics_gathering_node_delegate_wrapper::handle_block( const hotc::net::block_message& block_message, bool sync_mode, std::vector<fc::uint160_t>& contained_transaction_message_ids)
+    bool statistics_gathering_node_delegate_wrapper::handle_block(const hotc::net::block_message& block_message, bool sync_mode, std::vector<fc::sha256>& contained_transaction_message_ids)
     {
       INVOKE_AND_COLLECT_STATISTICS(handle_block, block_message, sync_mode, contained_transaction_message_ids);
     }

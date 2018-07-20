@@ -24,7 +24,7 @@
 #pragma once
 
 #include <hotc/net/config.hpp>
-#include <hotc/chain/protocol/block.hpp>
+#include <hotc/chain/block.hpp>
 
 #include <fc/crypto/ripemd160.hpp>
 #include <fc/crypto/elliptic.hpp>
@@ -46,7 +46,7 @@ namespace hotc { namespace net {
   using hotc::chain::signed_block;
 
   typedef fc::ecc::public_key_data node_id_t;
-  typedef fc::ripemd160 item_hash_t;
+  typedef fc::sha256 item_hash_t;
   struct item_id
   {
       uint32_t      item_type;
@@ -523,3 +523,4 @@ namespace std
        }
     };
 }
+

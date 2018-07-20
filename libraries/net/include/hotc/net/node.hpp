@@ -27,7 +27,7 @@
 #include <hotc/net/message.hpp>
 #include <hotc/net/peer_database.hpp>
 
-#include <hotc/chain/protocol/types.hpp>
+#include <hotc/chain/types.hpp>
 
 #include <list>
 
@@ -78,7 +78,7 @@ namespace hotc { namespace net {
           *          safe to broadcast on.
           */
          virtual bool handle_block( const hotc::net::block_message& blk_msg, bool sync_mode, 
-                                    std::vector<fc::uint160_t>& contained_transaction_message_ids ) = 0;
+                                    std::vector<fc::sha256>& contained_transaction_message_ids ) = 0;
          
          /**
           *  @brief Called when a new transaction comes in from the network
