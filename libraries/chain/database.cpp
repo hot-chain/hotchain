@@ -22,15 +22,19 @@
  * THE SOFTWARE.
  */
 
-#include <hotc/chain/database.hpp>
-#include <hotc/chain/exceptions.hpp>
+#include <Hotc/chain/database.hpp>
+#include <Hotc/chain/exceptions.hpp>
 
-#include <hotc/chain/block_summary_object.hpp>
-#include <hotc/chain/chain_property_object.hpp>
-#include <hotc/chain/global_property_object.hpp>
-#include <hotc/chain/account_object.hpp>
-#include <hotc/chain/transaction_object.hpp>
-#include <hotc/chain/producer_object.hpp>
+#include <Hotc/chain/block_summary_object.hpp>
+#include <Hotc/chain/chain_property_object.hpp>
+#include <Hotc/chain/global_property_object.hpp>
+#include <Hotc/chain/key_value_object.hpp>
+#include <Hotc/chain/action_objects.hpp>
+#include <Hotc/chain/transaction_object.hpp>
+#include <Hotc/chain/producer_object.hpp>
+
+#include <Hotc/types/native.hpp>
+#include <Hotc/types/generated.hpp>
 
 #include <fc/smart_ref_impl.hpp>
 #include <fc/uint128.hpp>
@@ -43,7 +47,38 @@
 #include <functional>
 #include <iostream>
 
-namespace hotc { namespace chain {
+#include <Wren++.h>
+
+namespace Hotc { namespace chain {
+
+
+String apply_context::get( String key )const {
+   const auto& obj = db.get<key_value_object,by_scope_key>( boost::make_tuple(recipient, key) );
+   return String(obj.value.begin(),obj.value.end());
+}
+void apply_context::set( String key, String value ) {
+   const auto* obj = db.find<key_value_object,by_scope_key>( boost::make_tuple(recipient, key) );
+   if( obj ) {
+      mutable_db.modify( *obj, [&]( auto& o ) {
+         o.value.resize( value.size() );
+        // memcpy( o.value.data(), value.data(), value.size() );
+      });
+   } else {
+      mutable_db.create<key_value_object>( [&](auto& o) {
+         o.scope = recipient;
+         o.key.insert( 0, key.data(), key.size() );
+         o.value.insert( 0, value.data(), value.size() );
+      });
+   }
+}
+void apply_context::remove( String key ) {
+   const auto* obj = db.find<key_value_object,by_scope_key>( boost::make_tuple(recipient, key) );
+   if( obj ) {
+      mutable_db.remove( *obj );
+   }
+}
+
+
 
 bool database::is_known_block(const block_id_type& id)const
 {
@@ -322,8 +357,12 @@ signed_block database::_generate_block(
          temp_session.squash();
 
          total_block_size += fc::raw::pack_size(tx);
-//         pending_block.transactions.push_back(tx);
-#warning TODO: Populate generated blocks with transactions
+         if (pending_block.cycles.empty()) {
+            pending_block.cycles.resize(1);
+            pending_block.cycles.back().resize(1);
+         }
+         pending_block.cycles.back().back().user_input.emplace_back(tx);
+#warning TODO: Populate generated blocks with generated transactions
       }
       catch ( const fc::exception& e )
       {
@@ -375,7 +414,7 @@ void database::pop_block()
    _pending_tx_session.reset();
    auto head_id = head_block_id();
    optional<signed_block> head_block = fetch_block_by_id( head_id );
-   HOTC_ASSERT( head_block.valid(), pop_empty_chain, "there are no blocks to pop" );
+   Hotc_ASSERT( head_block.valid(), pop_empty_chain, "there are no blocks to pop" );
 
    _fork_db.pop_block();
    undo();
@@ -460,7 +499,7 @@ void database::apply_transaction(const signed_transaction& trx, uint32_t skip)
 
 void database::validate_transaction(const signed_transaction& trx)const {
 try {
-   HOTC_ASSERT(trx.messages.size() > 0, transaction_exception, "A transaction must have at least one message");
+   Hotc_ASSERT(trx.messages.size() > 0, transaction_exception, "A transaction must have at least one message");
 
    validate_uniqueness(trx);
    validate_tapos(trx);
@@ -468,12 +507,12 @@ try {
    validate_expiration(trx);
    validate_message_types(trx);
 
-   for( const auto& m : trx.messages ) { /// TODO: this loop can be processed in parallel
-      message_validate_context mvc( trx, m );
-      auto contract_handlers_itr = message_validate_handlers.find( m.recipient );
-      if( contract_handlers_itr != message_validate_handlers.end() ) {
-         auto message_handler_itr = contract_handlers_itr->second.find( {m.recipient, m.type} );
-         if( message_handler_itr != contract_handlers_itr->second.end() ) {
+   for (const auto& m : trx.messages) { /// TODO: this loop can be processed in parallel
+      message_validate_context mvc(trx, m);
+      auto contract_handlers_itr = message_validate_handlers.find(m.recipient);
+      if (contract_handlers_itr != message_validate_handlers.end()) {
+         auto message_handler_itr = contract_handlers_itr->second.find({m.recipient, m.type});
+         if (message_handler_itr != contract_handlers_itr->second.end()) {
             message_handler_itr->second(mvc);
             continue;
          }
@@ -488,20 +527,20 @@ void database::validate_uniqueness( const signed_transaction& trx )const {
 
    auto trx_id = trx.id();
    auto& trx_idx = get_index<transaction_multi_index>();
-   HOTC_ASSERT(trx_idx.indices().get<by_trx_id>().find(trx_id) == trx_idx.indices().get<by_trx_id>().end(),
+   Hotc_ASSERT(trx_idx.indices().get<by_trx_id>().find(trx_id) == trx_idx.indices().get<by_trx_id>().end(),
               transaction_exception, "Transaction is not unique");
 }
 
-void database::validate_tapos( const signed_transaction& trx )const {
-try {
-   if( !should_check_tapos() ) return;
+void database::validate_tapos(const signed_transaction& trx)const {
+   if (!should_check_tapos()) return;
 
-   const auto&             tapos_block_summary = get<block_summary_object>(trx.ref_block_num);
+   const auto& tapos_block_summary = get<block_summary_object>(trx.ref_block_num);
 
    //Verify TaPoS block summary has correct ID prefix, and that this block's time is not past the expiration
-   HOTC_ASSERT(trx.ref_block_prefix == tapos_block_summary.block_id._hash[1], transaction_exception,
-              "Transaction's reference block did not match. Is this transaction from a different fork?");
-} FC_CAPTURE_AND_RETHROW( (trx) ) }
+   Hotc_ASSERT(trx.verify_reference_block(tapos_block_summary.block_id), transaction_exception,
+              "Transaction's reference block did not match. Is this transaction from a different fork?",
+              ("tapos_summary", tapos_block_summary));
+}
 
 void database::validate_referenced_accounts(const signed_transaction& trx)const {
    for(const auto& auth : trx.provided_authorizations) {
@@ -510,15 +549,17 @@ void database::validate_referenced_accounts(const signed_transaction& trx)const 
    for(const auto& msg : trx.messages) {
       get_account(msg.sender);
       get_account(msg.recipient);
-      const account_name* previous_notify_account = nullptr;
+      const AccountName* previous_notify_account = nullptr;
       for(const auto& current_notify_account : msg.notify) {
          get_account(current_notify_account);
-         if(previous_notify_account)
-            HOTC_ASSERT(current_notify_account < *previous_notify_account, message_validate_exception,
+         if(previous_notify_account) {
+            Hotc_ASSERT(current_notify_account < *previous_notify_account, message_validate_exception,
                        "Message notify accounts out of order. Possibly a bug in the wallet?");
-         HOTC_ASSERT(current_notify_account != msg.sender, message_validate_exception,
+         }
+
+         Hotc_ASSERT(current_notify_account != msg.sender, message_validate_exception,
                     "Message sender is listed in accounts to notify. Possibly a bug in the wallet?");
-         HOTC_ASSERT(current_notify_account != msg.recipient, message_validate_exception,
+         Hotc_ASSERT(current_notify_account != msg.recipient, message_validate_exception,
                     "Message recipient is listed in accounts to notify. Possibly a bug in the wallet?");
          previous_notify_account = &current_notify_account;
       }
@@ -530,11 +571,11 @@ void database::validate_expiration(const signed_transaction& trx) const
    fc::time_point_sec now = head_block_time();
    const chain_parameters& chain_parameters = get_global_properties().parameters;
 
-   HOTC_ASSERT(trx.expiration <= now + chain_parameters.maximum_time_until_expiration,
+   Hotc_ASSERT(trx.expiration <= now + chain_parameters.maximum_time_until_expiration,
               transaction_exception, "Transaction expiration is too far in the future",
               ("trx.expiration",trx.expiration)("now",now)
               ("max_til_exp",chain_parameters.maximum_time_until_expiration));
-   HOTC_ASSERT(now <= trx.expiration, transaction_exception, "Transaction is expired",
+   Hotc_ASSERT(now <= trx.expiration, transaction_exception, "Transaction is expired",
               ("now",now)("trx.exp",trx.expiration));
 } FC_CAPTURE_AND_RETHROW((trx)) }
 
@@ -542,12 +583,16 @@ void database::validate_message_types(const signed_transaction& trx)const {
 try {
    for( const auto& msg : trx.messages ) {
       try {
-         get<message_object, by_scope_name>( boost::make_tuple(msg.recipient, msg.type) );
-      } FC_CAPTURE_AND_RETHROW( (msg.recipient)(msg.type) )
+         get<type_object, by_scope_name>( boost::make_tuple(msg.recipient, msg.type) );
+      } catch(std::out_of_range) {
+         FC_THROW_EXCEPTION(message_validate_exception, "Unrecognized message recipient and type",
+                            ("recipient", msg.recipient)("type", msg.type));
+      }
    }
 } FC_CAPTURE_AND_RETHROW( (trx) ) }
 
-void database::validate_message_precondition( precondition_validate_context& context )const {
+void database::validate_message_precondition( precondition_validate_context& context )const 
+{ try {
     const auto& m = context.msg;
     auto contract_handlers_itr = precondition_validate_handlers.find( context.recipient );
     if( contract_handlers_itr != precondition_validate_handlers.end() ) {
@@ -558,9 +603,10 @@ void database::validate_message_precondition( precondition_validate_context& con
        }
     }
     /// TODO: dispatch to script if not handled above
-}
+} FC_CAPTURE_AND_RETHROW() }
 
-void database::apply_message( apply_context& context ) {
+void database::apply_message( apply_context& context ) 
+{ try {
     const auto& m = context.msg;
     auto contract_handlers_itr = apply_handlers.find( context.recipient );
     if( contract_handlers_itr != apply_handlers.end() ) {
@@ -570,8 +616,27 @@ void database::apply_message( apply_context& context ) {
           return;
        }
     }
+    const auto& processor = get<account_object,by_name>( context.recipient ); ///TODO: rename context.recipient to context.proecssor
+    const auto& recipient = get<account_object,by_name>( context.msg.recipient );
+
+    auto handler = find<action_code_object,by_processor_recipient_type>( boost::make_tuple(processor.id, recipient.id, context.msg.type) );
+    if( handler ) {
+       wdump((handler->apply.c_str()));
+      wrenpp::VM vm;
+      vm.executeString( R"(
+          foreign class ApplyContext {
+             foreign get(key)
+             foreign set(key,value)
+          }
+      )");
+      vm.executeString( handler->apply.c_str() );
+      auto apply_method = vm.method( "main", "Handler", "apply(_,_)" );
+      //apply_method( context, m.data );
+      //apply_method( "context", 1 );
+      apply_method( &context, 1 );
+    }
     /// TODO: dispatch to script if not handled above
-}
+} FC_CAPTURE_AND_RETHROW() }
 
 
 void database::_apply_transaction(const signed_transaction& trx)
@@ -586,9 +651,11 @@ void database::_apply_transaction(const signed_transaction& trx)
       apply_message( ac );
 
       for( const auto& n : m.notify ) {
-         apply_context c( *this, trx, m, n );
-         validate_message_precondition( c );
-         apply_message( c );
+         try {
+            apply_context c( *this, trx, m, n );
+            validate_message_precondition( c );
+            apply_message( c );
+         } FC_CAPTURE_AND_RETHROW( (n) ) 
       }
 
    }
@@ -702,7 +769,8 @@ void database::initialize_indexes() {
    add_index<permission_index>();
    add_index<action_code_index>();
    add_index<action_permission_index>();
-   add_index<message_index>();
+   add_index<type_index>();
+   add_index<key_value_index>();
 
    add_index<global_property_multi_index>();
    add_index<dynamic_global_property_multi_index>();
@@ -734,13 +802,16 @@ void database::init_genesis(const genesis_state_type& genesis_state)
    create<account_object>([&](account_object& a) {
       a.name = "sys";
    });
+#define MACRO(r, data, elem) register_type<types::elem>("sys");
+   BOOST_PP_SEQ_FOR_EACH(MACRO, x, Hotc_SYSTEM_CONTRACT_FUNCTIONS)
+#undef MACRO
 
    // Create initial accounts
    for (const auto& acct : genesis_state.initial_accounts) {
       create<account_object>([&acct](account_object& a) {
          a.name = acct.name.c_str();
          a.balance = acct.balance;
-         idump((acct.name)(a.balance));
+//         idump((acct.name)(a.balance));
 //         a.active_key = acct.active_key;
 //         a.owner_key = acct.owner_key;
       });
@@ -785,13 +856,24 @@ void database::init_genesis(const genesis_state_type& genesis_state)
 } FC_CAPTURE_AND_RETHROW() }
 
 database::database()
-{}
+{
+   static bool bound_apply = [](){
+      wrenpp::beginModule( "main" )
+         .bindClassReference<apply_context>( "ApplyContext" )
+            .bindFunction< decltype( &apply_context::get ), &apply_context::get >( false, "get(_)")
+            .bindFunction< decltype( &apply_context::set ), &apply_context::set >( false, "set(_,_)")
+         .endClass()
+      .endModule();
+      return true;
+   }();
+}
 
 database::~database()
 {
    close();
 //   clear_pending();
 }
+
 
 void database::replay(fc::path data_dir, uint64_t shared_file_size, const genesis_state_type& initial_allocation)
 { try {
@@ -956,7 +1038,7 @@ void database::update_last_irreversible_block()
 
    static_assert(config::IrreversibleThresholdPercent > 0, "irreversible threshold must be nonzero");
 
-   size_t offset = HOTC_PERCENT(producer_objs.size(), config::Percent100 - config::IrreversibleThresholdPercent);
+   size_t offset = Hotc_PERCENT(producer_objs.size(), config::Percent100 - config::IrreversibleThresholdPercent);
    std::nth_element(producer_objs.begin(), producer_objs.begin() + offset, producer_objs.end(),
       [](const producer_object* a, const producer_object* b) {
          return a->last_confirmed_block_num < b->last_confirmed_block_num;
@@ -1049,17 +1131,18 @@ uint32_t database::producer_participation_rate()const
 void database::update_producer_schedule()
 {
 }
-void database::set_validate_handler( const account_name& contract, const account_name& scope, const message_type& action, message_validate_handler v ) {
+
+void database::set_validate_handler( const AccountName& contract, const AccountName& scope, const TypeName& action, message_validate_handler v ) {
    message_validate_handlers[contract][std::make_pair(scope,action)] = v;
 }
-void database::set_precondition_validate_handler(  const account_name& contract, const account_name& scope, const message_type& action, precondition_validate_handler v ) {
+void database::set_precondition_validate_handler(  const AccountName& contract, const AccountName& scope, const TypeName& action, precondition_validate_handler v ) {
    precondition_validate_handlers[contract][std::make_pair(scope,action)] = v;
 }
-void database::set_apply_handler( const account_name& contract, const account_name& scope, const message_type& action, apply_handler v ) {
+void database::set_apply_handler( const AccountName& contract, const AccountName& scope, const TypeName& action, apply_handler v ) {
    apply_handlers[contract][std::make_pair(scope,action)] = v;
 }
 
-const account_object&   database::get_account( const account_name& name )const {
+const account_object&   database::get_account( const AccountName& name )const {
 try {
     return get<account_object,by_name>(name);
 } FC_CAPTURE_AND_RETHROW( (name) ) }
