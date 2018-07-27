@@ -1,0 +1,112 @@
+typedef Name           AccountName
+typedef Name           PermissionName
+typedef Name           FuncName
+typedef FixedString32  MessageName
+typedef FixedString32  TypeName
+
+# import account type as localtype
+
+struct AccountPermission
+   account    AccountName
+   permission PermissionName
+
+struct Message
+   code            AccountName         # the contract defining the code to execute
+   recipients      AccountName[]       # the contexts within which the above code will execute
+   authorization   AccountPermission[] # the accounts and permission levels provided
+   type            FuncName            # the action to be taken 
+   data            Bytes               # opaque data processed by code
+
+struct AccountPermissionWeight
+   permission   AccountPermission
+   weight       UInt16
+
+struct Transaction
+   refBlockNum       UInt16
+   refBlockPrefix    UInt32
+   expiration        Time
+   scope             AccountName[]   # the accounts whose data may be accessed while processing this transaction
+   messages          Message[]
+
+struct SignedTransaction inherits Transaction
+   signatures     Signature[]
+   authorizations AccountPermission[]
+
+struct KeyPermissionWeight
+   key    PublicKey
+   weight UInt16
+
+struct Authority
+   threshold UInt32
+   keys      KeyPermissionWeight[]
+   accounts  AccountPermissionWeight[]
+
+struct BlockchainConfiguration
+   maxBlockSize      UInt32
+   targetBlockSize   UInt32
+   maxStorageSize    UInt64
+   electedPay        ShareType
+   runnerUpPay       ShareType
+   minHOTCBalance     ShareType
+   maxTrxLifetime    UInt32
+
+struct transfer
+   from      AccountName  # may not be the message.sender if message.sender has delegated authority by from
+   to        AccountName
+   amount    Asset
+   memo      String
+
+struct lock
+   from      AccountName
+   to        AccountName
+   amount    ShareType
+
+struct unlock
+   account   AccountName
+   amount    ShareType
+
+struct claim
+   account   AccountName
+   amount    ShareType
+
+struct newaccount
+   creator   AccountName
+   name      AccountName
+   owner     Authority
+   active    Authority
+   recovery  Authority
+   deposit   Asset
+
+struct setcode
+   account         AccountName  # the account that is handling the message
+   vmtype          UInt8        # the virtual machine type
+   vmversion       UInt8        # the virtual machine version
+   code            Bytes        # the apply
+
+
+struct setproducer
+   name           AccountName
+   key            PublicKey
+   configuration  BlockchainConfiguration
+
+# implies message.sender account
+struct okproducer
+   producer  AccountName
+   approve   Int8  # 0 or 1
+
+# implies message.sender account
+
+# implies message.sender account
+struct setproxy
+   proxy   AccountName
+
+
+struct UpdatePermission
+   account     AccountName
+   permission  PermissionName
+   parent      PermissionName
+   authority   Authority
+
+struct DeletePermission
+   account AccountName
+   permission PermissionName
