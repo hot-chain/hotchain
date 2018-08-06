@@ -47,7 +47,7 @@ struct BlockchainConfiguration
    maxStorageSize    UInt64
    electedPay        ShareType
    runnerUpPay       ShareType
-   minHOTCBalance     ShareType
+   minHotcBalance     ShareType
    maxTrxLifetime    UInt32
 
 struct transfer
