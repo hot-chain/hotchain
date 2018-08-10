@@ -1,8 +1,8 @@
 #pragma once
-#include <hotc_hotc/chain/block.hpp>
-#include <hotc_hotc/chain/types.hpp>
+#include <hotc/chain/block.hpp>
+#include <hotc/chain/types.hpp>
 
-namespace hotc_hotc {
+namespace hotc {
    using namespace chain;
    using namespace fc;
 
@@ -45,19 +45,19 @@ namespace hotc_hotc {
                                       SignedTransaction,
                                       signed_block>;
 
-} // namespace hotc_hotc
+} // namespace hotc
 
 
-FC_REFLECT( hotc_hotc::handshake_message,
+FC_REFLECT( hotc::handshake_message,
             (network_version)(chain_id)(node_id)
             (last_irreversible_block_num)(last_irreversible_block_id)
             (head_num)(head_id)
             (os)(agent) )
 
-FC_REFLECT( hotc_hotc::block_summary_message, (block)(trx_ids) )
-FC_REFLECT( hotc_hotc::notice_message, (known_trx)(known_blocks) )
-FC_REFLECT( hotc_hotc::sync_request_message, (start_block)(end_block) )
-FC_REFLECT( hotc_hotc::peer_message, (peers) )
+FC_REFLECT( hotc::block_summary_message, (block)(trx_ids) )
+FC_REFLECT( hotc::notice_message, (known_trx)(known_blocks) )
+FC_REFLECT( hotc::sync_request_message, (start_block)(end_block) )
+FC_REFLECT( hotc::peer_message, (peers) )
 
 /**
  *

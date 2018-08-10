@@ -1,8 +1,8 @@
 #pragma once
 #include <appbase/application.hpp>
-#include <_hotc/chain_plugin/chain_plugin.hpp>
+#include <hotc/chain_plugin/chain_plugin.hpp>
 
-namespace _hotc {
+namespace hotc {
    using namespace appbase;
 
    class net_plugin : public appbase::plugin<net_plugin>
