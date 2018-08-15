@@ -1,12 +1,13 @@
 #pragma once
 
-#include <hotc/chain/protocol/types.hpp>
+#include <hotc/chain/types.hpp>
 
 namespace hotc { namespace chain {
 
 /**
  * @brief The message struct defines a blockchain message
  *
+#warning Outdated documentation should be fixed
  * Messages are the heart of all activity on the blockchain,
  * -- all events and actions which take place in the chain are
  * recorded as messages. Messages are sent from one account 
@@ -18,39 +19,42 @@ namespace hotc { namespace chain {
  * @ref data, whose type is determined by @ref type, which is 
  * dynamic and defined by the scripting language.
  */
-struct message {
-   /// The account which sent the message
-   account_name         sender;
-
-   /// The account to receive the message
-   account_name         recipient;
-
-   /// Other accounts to notify about this message
-   vector<account_name> notify;
-
-   /**
-    * Every contract defines the set of types that it accepts, these types are
-    * scoped according to the recipient. This means two contracts can can define
-    * two different types with the same name.
-    */
-   message_type         type;
-
-   /// The message contents
-   vector<char>         data;
+struct Message : public types::Message {
+   Message() = default;
+   template<typename T>
+   Message(const AccountName& code, const vector<types::AccountName>& recipients,
+           const vector<types::AccountPermission>& authorization, const types::FuncName& type, T&& value)
+      :types::Message(code, type, recipients, authorization, Bytes()) {
+      set<T>(type, std::forward<T>(value));
+   }
+   Message(const types::Message& m) : types::Message(m) {}
 
    template<typename T>
-   void set( const message_type& t, const T& value ) {
+   void set(const types::FuncName& t, const T& value) {
       type = t;
-      data = fc::raw::pack( value );
+      data = fc::raw::pack(value);
    }
    template<typename T>
    T as()const {
       return fc::raw::unpack<T>(data);
    }
-   bool has_notify( const account_name& n )const {
-      for( const auto& no : notify )
-         if( no == n ) return true;
+   bool has_notify(const AccountName& n)const {
+      for(const auto& no : recipients)
+         if(no == n) return true;
       return false; 
+   }
+
+   template<typename Lambda>
+   void for_each_handler(Lambda&& l)const {
+      l(code);
+      for(const auto& recipient : recipients)
+         l(recipient);
+   }
+
+   types::AccountName recipient(UInt8 index) const {
+      FC_ASSERT(index < recipients.size(), "Invalid recipient index: ${index}/${size}",
+                ("index", index)("size", recipients.size()));
+      return recipients.at(int(index));
    }
 };
 
@@ -58,4 +62,4 @@ struct message {
 
 } } // namespace hotc::chain
 
-FC_REFLECT(hotc::chain::message, (sender)(recipient)(notify)(type)(data))
+FC_REFLECT_DERIVED(hotc::chain::Message, (hotc::types::Message), )
