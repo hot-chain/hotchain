@@ -1,6 +1,6 @@
-#include <eoslib/eos.hpp>
-#include <eoslib/token.hpp>
-#include <eoslib/db.hpp>
+#include <hotclib/hotc.hpp>
+#include <hotclib/token.hpp>
+#include <hotclib/db.hpp>
 
 /**
  * Make it easy to change the account name the currency is deployed to.
@@ -11,7 +11,7 @@
 
 namespace TOKEN_NAME {
 
-   typedef eos::token<uint64_t,N(currency)> Tokens;
+   typedef hotc::token<uint64_t,N(currency)> Tokens;
 
    /**
     *  Transfer requires that the sender and receiver be the first two

@@ -1,7 +1,7 @@
-currency.wast: currency.cpp Makefile ../eoslib/eos.hpp currency.hpp
+currency.wast: currency.cpp Makefile ../hotclib/hotc.hpp currency.hpp
 	 /usr/local/Cellar/llvm/4.0.0_1/bin/clang-4.0 -emit-llvm -O3 --std=c++14 --target=wasm32 -c currency.cpp  -I.. -fno-threadsafe-statics -fno-rtti -fno-exceptions -o .currency.bc 
 	 /Users/dlarimer/Downloads/llvm/build/bin/llc -asm-verbose=false .currency.bc
-	 /Users/dlarimer/eos/libraries/binaryen/bin/s2wasm -s 1024 .currency.s > currency.wast
+	 /Users/dlarimer/hotc/libraries/binaryen/bin/s2wasm -s 1024 .currency.s > currency.wast
 	 wc -l currency.wast
 	 echo '#pragma once
 ' > currency.wast.hpp
@@ -14,10 +14,10 @@ currency.wast: currency.cpp Makefile ../eoslib/eos.hpp currency.hpp
 
 
 
-test.wast: test.cpp Makefile ../eoslib/eos.hpp 
+test.wast: test.cpp Makefile ../hotclib/hotc.hpp 
 	 /usr/local/Cellar/llvm/4.0.0_1/bin/clang-4.0 -emit-llvm --std=c++14 --target=wasm32 -c test.cpp  -I.. -fno-threadsafe-statics -fno-rtti -fno-exceptions -o .test.bc 
 	 /Users/dlarimer/Downloads/llvm/build/bin/llc -asm-verbose=false .test.bc
-	 /Users/dlarimer/eos/libraries/binaryen/bin/s2wasm -s 1024 .test.s > test.wast
+	 /Users/dlarimer/hotc/libraries/binaryen/bin/s2wasm -s 1024 .test.s > test.wast
 	 wc -l test.wast
 	 echo '#pragma once
 ' > test.wast.hpp

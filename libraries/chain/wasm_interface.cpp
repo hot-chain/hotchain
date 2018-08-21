@@ -1,4 +1,5 @@
 #include <hotc/chain/wasm_interface.hpp>
+#include <hotc/chain/chain_controller.hpp>
 #include "Platform/Platform.h"
 #include "WAST/WAST.h"
 #include "Runtime/Runtime.h"
@@ -17,98 +18,165 @@ namespace hotc { namespace chain {
    wasm_interface::wasm_interface() {
    }
 
-DEFINE_INTRINSIC_FUNCTION4(env,store,store,none,i32,keyptr,i32,keylen,i32,valueptr,i32,valuelen ) {
-//   ilog( "store ${keylen}  ${vallen}", ("keylen",keylen)("vallen",valuelen) );
-/*
-   FC_ASSERT( keylen > 0 );
-   FC_ASSERT( valuelen >= 0 );
-
+DEFINE_INTRINSIC_FUNCTION2(env,multeq_i128,multeq_i128,none,i32,self,i32,other) {
    auto& wasm  = wasm_interface::get();
-
-   FC_ASSERT( wasm.current_apply_context, "no apply context found" );
-
-   auto& db    = wasm.current_apply_context->mutable_db;
-   auto& scope = wasm.current_apply_context->scope;
    auto  mem   = wasm.current_memory;
-   char* key   = memoryArrayPtr<char>( mem, keyptr, keylen);
-   char* value = memoryArrayPtr<char>( mem, valueptr, valuelen);
-   string keystr( key, key+keylen);
-
-//   if( valuelen == 8 ) idump(( *((int64_t*)value)));
-
-
-   const auto* obj = db.find<key_value_object,by_scope_key>( boost::make_tuple(scope, keystr) );
-   if( obj ) {
-      db.modify( *obj, [&]( auto& o ) {
-         o.value.assign(value, valuelen);
-      });
-   } else {
-      db.create<key_value_object>( [&](auto& o) {
-         o.scope = scope;
-         o.key.insert( 0, key, keylen );
-         o.value.insert( 0, value, valuelen );
-      });
-   }
-*/
+   uint128_t& v = memoryRef<uint128_t>( mem, self );
+   const uint128_t& o= memoryRef<const uint128_t>( mem, other );
+   v *= o;
 }
 
-DEFINE_INTRINSIC_FUNCTION4(env,load,load,i32,i32,keyptr,i32,keylen,i32,valueptr,i32,valuelen ) {
-//   ilog( "load ${keylen}  ${vallen}", ("keylen",keylen)("vallen",valuelen) );
-/**
-   FC_ASSERT( keylen > 0 );
-   FC_ASSERT( valuelen >= 0 );
+
+DEFINE_INTRINSIC_FUNCTION2(env,diveq_i128,diveq_i128,none,i32,self,i32,other) {
+   auto& wasm  = wasm_interface::get();
+   auto  mem          = wasm.current_memory;
+   uint128_t& v       = memoryRef<uint128_t>( mem, self );
+   const uint128_t& o = memoryRef<const uint128_t>( mem, other );
+   FC_ASSERT( o != 0, "divide by zero" );
+   v /= o;
+}
+
+DEFINE_INTRINSIC_FUNCTION0(env,now,now,i32) {
+   return wasm_interface::get().current_validate_context->controller.head_block_time().sec_since_epoch();
+}
+
+DEFINE_INTRINSIC_FUNCTION4(env,store_i128i128,store_i128i128,i32,i64,scope,i64,table,i32,data,i32,datalen) {
+   static const uint32_t keylen = 2*sizeof(uint128_t);
+   FC_ASSERT( datalen >= keylen, "insufficient data passed" );
 
    auto& wasm  = wasm_interface::get();
+   FC_ASSERT( wasm.current_apply_context, "not a valid apply context" );
 
-   FC_ASSERT( wasm.current_apply_context, "no apply context found" );
+   char* v     = memoryArrayPtr<char>( wasm.current_memory, data, datalen );
 
-   auto& db    = wasm.current_apply_context->mutable_db;
-   auto& scope = wasm.current_apply_context->scope;
-   auto  mem   = wasm.current_memory;
-   char* key   = memoryArrayPtr<char>( mem, keyptr, keylen );
-   char* value = memoryArrayPtr<char>( mem, valueptr, valuelen );
-   string keystr( key, key+keylen);
+   uint128_t*  primary   = ((uint128_t*)v);
+   uint128_t*  secondary = primary + 1;
 
-   const auto* obj = db.find<key_value_object,by_scope_key>( boost::make_tuple(scope, keystr) );
-   if( obj == nullptr ) return -1;
-   auto copylen =  std::min<size_t>(obj->value.size(),valuelen);
-   if( copylen ) {
-      obj->value.copy(value, copylen);
-   }
-   return copylen;
-*/
+   char* value = (char*)(secondary+1);
+   uint32_t valuelen = datalen - keylen;
+   auto result = wasm_interface::get().current_apply_context->store_i128i128( 
+                Name(scope), Name(table),
+                *primary, *secondary, value, valuelen ) + keylen;
+   wdump((datalen)(valuelen)(result));
+   return result;
+}
+
+DEFINE_INTRINSIC_FUNCTION3(env,remove_i128i128,remove_i128i128,i32,i64,scope,i64,table,i32,data) {
+   FC_ASSERT( !"remove not implemented" );
    return 0;
 }
 
-
-DEFINE_INTRINSIC_FUNCTION1(env,name_to_int64,name_to_int64,i64,i32,cstr) {
+DEFINE_INTRINSIC_FUNCTION5(env,load_primary_i128i128,load_primary_i128i128,i32,i64,scope,i64,code,i64,table,i32,data,i32,datalen) {
    auto& wasm  = wasm_interface::get();
-   auto  mem   = wasm.current_memory;
-   const char* str   = memoryArrayPtr<const char>( mem, cstr, 13);
-   return Name(str).value;
+   char* v     = &memoryRef<char>( wasm.current_memory, data );
+   return wasm_interface::get().current_validate_context->load_primary_i128i128( Name(scope), Name(code), Name(table),
+                                                                          (uint128_t*)v, (uint128_t*)(v+sizeof(uint128_t)), v, datalen-(2*sizeof(uint128_t)) );
 }
 
-DEFINE_INTRINSIC_FUNCTION2(env,remove,remove,i32,i32,keyptr,i32,keylen) {
-   /*
-   FC_ASSERT( keylen > 0 );
 
+DEFINE_INTRINSIC_FUNCTION5(env,load_secondary_i128i128,load_secondary_i128i128,i32,i64,scope,i64,code,i64,table,i32,data,i32,datalen) {
+   FC_ASSERT( !"load_secondary_i128i128 not implemented" );
+   return 0;
+}
+
+DEFINE_INTRINSIC_FUNCTION5(env,back_primary_i128i128,back_primary_i128i128,i32,i64,scope,i64,code,i64,table,i32,data,i32,datalen) {
+   wlog( "back primary" );
+   auto& wasm  = wasm_interface::get();
+   char* v     = &memoryRef<char>( wasm.current_memory, data );
+   return wasm_interface::get().current_validate_context->back_primary_i128i128( Name(scope), Name(code), Name(table),
+                                                                          (uint128_t*)v, (uint128_t*)(v+sizeof(uint128_t)), v, datalen-(2*sizeof(uint128_t)) );
+}
+DEFINE_INTRINSIC_FUNCTION5(env,front_primary_i128i128,front_primary,i32,i64,scope,i64,code,i64,table,i32,data,i32,datalen) {
+   wlog( "front primary" );
+   auto& wasm  = wasm_interface::get();
+   char* v     = &memoryRef<char>( wasm.current_memory, data );
+   return wasm_interface::get().current_validate_context->front_primary_i128i128( Name(scope), Name(code), Name(table),
+                                                                          (uint128_t*)v, (uint128_t*)(v+sizeof(uint128_t)), 
+                                                                          v, datalen-(2*sizeof(uint128_t)) ) + 2*sizeof(uint128_t);
+}
+
+DEFINE_INTRINSIC_FUNCTION5(env,back_secondary_i128i128,back_secondary_i128i128,i32,i64,scope,i64,code,i64,table,i32,data,i32,datalen) {
+   wlog( "back secondary" );
+   auto& wasm  = wasm_interface::get();
+   char* v     = memoryArrayPtr<char>( wasm.current_memory, data, datalen );
+
+
+
+   return wasm_interface::get().current_validate_context->back_secondary_i128i128( Name(scope), Name(code), Name(table),
+                                                                          (uint128_t*)v, (uint128_t*)(v+sizeof(uint128_t)), v, datalen-(2*sizeof(uint128_t)) );
+}
+DEFINE_INTRINSIC_FUNCTION5(env,front_secondary_i128i128,front_secondary_i128i128,i32,i64,scope,i64,code,i64,table,i32,data,i32,datalen) {
+   wlog( "front secondary" );
+   FC_ASSERT( datalen >= 2*sizeof(uint128_t), "insufficient data passed" );
    auto& wasm  = wasm_interface::get();
 
+   char* v = memoryArrayPtr<char>( wasm.current_memory, data, datalen );
+
+   uint128_t* primary   = (uint128_t*)v;
+   uint128_t* secondary = primary+1;
+   const uint32_t keylen = 2*sizeof(uint128_t);
+
+   char* value       = v + keylen;
+   uint64_t valuelen = datalen - keylen;
+
+   auto result = wasm_interface::get().current_validate_context->front_secondary_i128i128( Name(scope), Name(code), Name(table),
+                                                                          primary, secondary, value, valuelen);
+   if( result >= 0) {
+      result += keylen;
+   }
+   wdump((result)(datalen));
+   return result;
+}
+
+DEFINE_INTRINSIC_FUNCTION0(env,currentCode,currentCode,i64) {
+   auto& wasm  = wasm_interface::get();
+   return wasm.current_validate_context->code.value;
+}
+
+DEFINE_INTRINSIC_FUNCTION1(env,requireAuth,requireAuth,none,i64,account) {
+   wasm_interface::get().current_validate_context->require_authorization( Name(account) );
+}
+
+DEFINE_INTRINSIC_FUNCTION1(env,requireNotice,requireNotice,none,i64,account) {
+   wasm_interface::get().current_validate_context->require_recipient( account );
+}
+
+DEFINE_INTRINSIC_FUNCTION1(env,requireScope,requireScope,none,i64,scope) {
+   wasm_interface::get().current_validate_context->require_scope( scope );
+}
+
+DEFINE_INTRINSIC_FUNCTION5(env,store_i64,store_i64,i32,i64,scope,i64,table,i64,key,i32,valueptr,i32,valuelen) 
+{
+   auto& wasm  = wasm_interface::get();
    FC_ASSERT( wasm.current_apply_context, "no apply context found" );
 
-   auto& db    = wasm.current_apply_context->mutable_db;
-   auto& scope = wasm.current_apply_context->scope;
    auto  mem   = wasm.current_memory;
-   char* key   = memoryArrayPtr<char>( mem, keyptr, keylen);
-   string keystr( key, key+keylen);
+   char* value = memoryArrayPtr<char>( mem, valueptr, valuelen);
 
-   const auto* obj = db.find<key_value_object,by_scope_key>( boost::make_tuple(scope, keystr) );
-   if( obj ) {
-      db.remove( *obj );
-      return true;
-   }
-   */
-   return false;
+   //idump((Name(scope))(Name(code))(Name(table))(Name(key))(valuelen) );
+
+   return wasm.current_apply_context->store_i64( scope, table, key, value, valuelen );
+}
+
+DEFINE_INTRINSIC_FUNCTION6(env,load_i64,load_i64,i32,i64,scope,i64,code,i64,table,i64,key,i32,valueptr,i32,valuelen) 
+{
+   //idump((Name(scope))(Name(code))(Name(table))(Name(key))(valuelen) );
+
+   FC_ASSERT( valuelen >= 0 );
+
+   auto& wasm  = wasm_interface::get();
+   FC_ASSERT( wasm.current_validate_context, "no apply context found" );
+
+   auto  mem   = wasm.current_memory;
+   char* value = memoryArrayPtr<char>( mem, valueptr, valuelen);
+
+   return wasm.current_validate_context->load_i64( scope, code, table, key, value, valuelen );
+}
+
+DEFINE_INTRINSIC_FUNCTION3(env,remove_i64,remove_i64,i32,i64,scope,i64,table,i64,key) {
+   auto& wasm  = wasm_interface::get();
+   FC_ASSERT( wasm.current_apply_context, "no apply context found" );
+   return wasm.current_apply_context->remove_i64( scope, table, key );
 }
 
 DEFINE_INTRINSIC_FUNCTION3(env,memcpy,memcpy,i32,i32,dstp,i32,srcp,i32,len) {
@@ -197,7 +265,8 @@ DEFINE_INTRINSIC_FUNCTION2(env,readMessage,readMessage,i32,i32,destptr,i32,dests
 }
 
 DEFINE_INTRINSIC_FUNCTION2(env,assert,assert,none,i32,test,i32,msg) {
-  std::string message = &Runtime::memoryRef<char>( wasm_interface::get().current_memory, msg );
+   const char* m = &Runtime::memoryRef<char>( wasm_interface::get().current_memory, msg );
+  std::string message( m );
   if( !test ) edump((message));
   FC_ASSERT( test, "assertion failed: ${s}", ("s",message)("ptr",msg) );
 }
@@ -217,17 +286,25 @@ DEFINE_INTRINSIC_FUNCTION1(env,malloc,malloc,i32,i32,size) {
 
 DEFINE_INTRINSIC_FUNCTION1(env,printi,printi,none,i64,val) {
   std::cerr << uint64_t(val);
-//  idump((val));
 }
 
-DEFINE_INTRINSIC_FUNCTION1(env,print,print,none,i32,charptr) {
+DEFINE_INTRINSIC_FUNCTION1(env,printi128,printi128,none,i32,val) {
+  auto& wasm  = wasm_interface::get();
+  auto  mem   = wasm.current_memory;
+  fc::uint128_t& value = memoryRef<fc::uint128_t>( mem, val );
+  std::cerr << fc::variant(value).get_string();
+}
+DEFINE_INTRINSIC_FUNCTION1(env,printn,printn,none,i64,val) {
+  std::cerr << Name(val).toString();
+}
+
+DEFINE_INTRINSIC_FUNCTION1(env,prints,prints,none,i32,charptr) {
   auto& wasm  = wasm_interface::get();
   auto  mem   = wasm.current_memory;
 
   const char* str = &memoryRef<const char>( mem, charptr );
 
   std::cerr << std::string( str, strlen(str) );
-//	wlog( std::string( str, strlen(size) ) );
 }
 
 DEFINE_INTRINSIC_FUNCTION1(env,free,free,none,i32,ptr) {
@@ -297,10 +374,15 @@ DEFINE_INTRINSIC_FUNCTION1(env,toUpper,toUpper,none,i32,charptr) {
          */
          /// TODO: cache this somehow
          FunctionInstance* call = asFunctionNullable(getInstanceExport(current_module,name) );
-         if( !call )
+         if( !call ) {
+            //wlog( "unable to find call ${name}", ("name",name));
+            return;
+         }
          //FC_ASSERT( apply, "no entry point found for ${call}", ("call", std::string(name))  );
 
          FC_ASSERT( getFunctionType(call)->parameters.size() == 2 );
+
+         idump((current_validate_context->msg.code)(current_validate_context->msg.type)(current_validate_context->code));
          std::vector<Value> args = { Value(uint64_t(current_validate_context->msg.code)),
                                      Value(uint64_t(current_validate_context->msg.type)) };
 
@@ -324,10 +406,10 @@ DEFINE_INTRINSIC_FUNCTION1(env,toUpper,toUpper,none,i32,charptr) {
    void  wasm_interface::vm_onInit()
    { try {
       try {
-         // wlog( "on_init" );
+          wlog( "on_init" );
             FunctionInstance* apply = asFunctionNullable(getInstanceExport(current_module,"init"));
             if( !apply ) {
-               wlog( "no onInit method found" );
+               elog( "no onInit method found" );
                return; /// if not found then it is a no-op
          }
 
@@ -391,6 +473,7 @@ DEFINE_INTRINSIC_FUNCTION1(env,toUpper,toUpper,none,i32,charptr) {
 
    void wasm_interface::load( const AccountName& name, const chainbase::database& db ) {
       const auto& recipient = db.get<account_object,by_name>( name );
+  //    idump(("recipient")(Name(name))(recipient.code_version));
 
       auto& state = instances[name];
       if( state.code_version != recipient.code_version ) {
@@ -406,6 +489,7 @@ DEFINE_INTRINSIC_FUNCTION1(env,toUpper,toUpper,none,i32,charptr) {
         try
         {
           wlog( "LOADING CODE" );
+          auto start = fc::time_point::now();
           Serialization::MemoryInputStream stream((const U8*)recipient.code.data(),recipient.code.size());
           WASM::serialize(stream,*state.module);
 
@@ -413,21 +497,25 @@ DEFINE_INTRINSIC_FUNCTION1(env,toUpper,toUpper,none,i32,charptr) {
           LinkResult linkResult = linkModule(*state.module,rootResolver);
           state.instance = instantiateModule( *state.module, std::move(linkResult.resolvedImports) );
           FC_ASSERT( state.instance );
+          auto end = fc::time_point::now();
+          idump(( (end-start).count()/1000000.0) );
+
           current_memory = Runtime::getDefaultMemory(state.instance);
 
           char* memstart = &memoryRef<char>( current_memory, 0 );
          // state.init_memory.resize(1<<16); /// TODO: actually get memory size
-          std::cerr <<"INIT MEMORY: \n";
           for( uint32_t i = 0; i < 10000; ++i )
               if( memstart[i] ) {
-                   state.mem_end = i;
+                   state.mem_end = i+1;
                    //std::cerr << (char)memstart[i];
               }
+          ilog( "INIT MEMORY: ${size}", ("size", state.mem_end) );
 
           state.init_memory.resize(state.mem_end);
           memcpy( state.init_memory.data(), memstart, state.mem_end ); //state.init_memory.size() );
           std::cerr <<"\n";
           state.code_version = recipient.code_version;
+          idump((state.code_version));
         }
         catch(Serialization::FatalSerializationException exception)
         {
@@ -451,6 +539,5 @@ DEFINE_INTRINSIC_FUNCTION1(env,toUpper,toUpper,none,i32,charptr) {
       current_memory = getDefaultMemory( current_module );
       current_state  = &state;
    }
-
 
 } }

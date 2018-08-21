@@ -57,41 +57,6 @@
 namespace hotc { namespace chain {
 
 
-String apply_context::get( String key )const {
-   /*
-   const auto& obj = db.get<key_value_object,by_scope_key>( boost::make_tuple(scope, key) );
-   return String(obj.value.begin(),obj.value.end());
-   */
-   return String();
-}
-void apply_context::set( String key, String value ) {
-   /*
-   const auto* obj = db.find<key_value_object,by_scope_key>( boost::make_tuple(scope, key) );
-   if( obj ) {
-      mutable_db.modify( *obj, [&]( auto& o ) {
-         o.value.resize( value.size() );
-        // memcpy( o.value.data(), value.data(), value.size() );
-      });
-   } else {
-      mutable_db.create<key_value_object>( [&](auto& o) {
-         o.scope = scope;
-         o.key.insert( 0, key.data(), key.size() );
-         o.value.insert( 0, value.data(), value.size() );
-      });
-   }
-   */
-}
-void apply_context::remove( String key ) {
-   /*
-   const auto* obj = db.find<key_value_object,by_scope_key>( boost::make_tuple(scope, key) );
-   if( obj ) {
-      mutable_db.remove( *obj );
-   }
-   */
-}
-
-
-
 bool chain_controller::is_known_block(const block_id_type& id)const
 {
    return _fork_db.is_known_block(id) || _block_log.read_block_by_id(id);
@@ -507,18 +472,19 @@ void chain_controller::validate_transaction(const SignedTransaction& trx)const {
 try {
    HOTC_ASSERT(trx.messages.size() > 0, transaction_exception, "A transaction must have at least one message");
 
+   validate_scope(trx);
+   validate_expiration(trx);
    validate_uniqueness(trx);
    validate_tapos(trx);
    validate_referenced_accounts(trx);
-   validate_expiration(trx);
 
-   for (const auto& tm : trx.messages) { /// TODO: this loop can be processed in parallel
+   for (const auto& tm : trx.messages) { 
       const Message* m = reinterpret_cast<const Message*>(&tm); //  m(tm);
       m->for_each_handler( [&]( const AccountName& a ) {
 
          #warning TODO: call validate handlers on all notified accounts, currently it only calls the recipient's validate
 
-         message_validate_context mvc(_db,trx,*m,a);
+         message_validate_context mvc(*this,_db,trx,*m,a);
          auto contract_handlers_itr = message_validate_handlers.find(a); /// namespace is the notifier
          if (contract_handlers_itr != message_validate_handlers.end()) {
             auto message_handler_itr = contract_handlers_itr->second.find({m->code, m->type});
@@ -535,6 +501,12 @@ try {
    }
 
 } FC_CAPTURE_AND_RETHROW( (trx) ) }
+
+void chain_controller::validate_scope( const SignedTransaction& trx )const {
+   HOTC_ASSERT(trx.scope.size() > 0, transaction_exception, "No scope specified by transaction" );
+   for( uint32_t i = 1; i < trx.scope.size(); ++i )
+      HOTC_ASSERT( trx.scope[i-1] < trx.scope[i], transaction_exception, "Scopes must be sorted and unique" );
+}
 
 void chain_controller::validate_uniqueness( const SignedTransaction& trx )const {
    if( !should_check_for_duplicate_transactions() ) return;
@@ -568,9 +540,6 @@ void chain_controller::validate_referenced_accounts(const SignedTransaction& trx
                        "Message recipient accounts out of order. Possibly a bug in the wallet?",
                        ("current", current_recipient.value)("previous", previous_recipient->value));
          }
-
-         HOTC_ASSERT(current_recipient != msg.code, message_validate_exception,
-                    "Code account is listed among recipients. Possibly a bug in the wallet?");
          previous_recipient = &current_recipient;
       }
    }
@@ -628,7 +597,7 @@ void chain_controller::validate_message_precondition( precondition_validate_cont
  *  entire message.
  */
 void chain_controller::process_message( const Transaction& trx, const Message& message) {
-   apply_context apply_ctx(_db, trx, message, message.code);
+   apply_context apply_ctx(*this, _db, trx, message, message.code);
 
    /** TODO: pre condition validation and application can occur in parallel */
    /** TODO: verify that message is fully authorized
@@ -637,8 +606,9 @@ void chain_controller::process_message( const Transaction& trx, const Message& m
    apply_message(apply_ctx);
 
    for (const auto& recipient : message.recipients) {
+      if( recipient == message.code ) continue; /// we already ran it above
       try {
-         apply_context recipient_ctx(_db, trx, message, recipient);
+         apply_context recipient_ctx(*this,_db, trx, message, recipient);
          validate_message_precondition(recipient_ctx);
          apply_message(recipient_ctx);
       } FC_CAPTURE_AND_RETHROW((recipient)(message))
@@ -660,6 +630,7 @@ void chain_controller::apply_message(apply_context& context)
     }
     const auto& recipient = _db.get<account_object,by_name>(context.code);
     if (recipient.code.size()) {
+       //idump((context.code)(context.msg.type));
        wasm_interface::get().apply(context);
     }
 
@@ -798,6 +769,7 @@ void chain_controller::initialize_indexes() {
    _db.add_index<permission_index>();
    _db.add_index<action_permission_index>();
    _db.add_index<key_value_index>();
+   _db.add_index<key128x128_value_index>();
 
    _db.add_index<global_property_multi_index>();
    _db.add_index<dynamic_global_property_multi_index>();
