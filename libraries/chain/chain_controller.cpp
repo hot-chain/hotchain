@@ -36,6 +36,7 @@
 
 #include <hotc/types/native.hpp>
 #include <hotc/types/generated.hpp>
+#include <hotc/types/AbiSerializer.hpp>
 
 #include <hotc/utilities/rand.hpp>
 
@@ -606,7 +607,7 @@ void chain_controller::process_message( const Transaction& trx, const Message& m
    apply_message(apply_ctx);
 
    for (const auto& recipient : message.recipients) {
-      if( recipient == message.code ) continue; /// we already ran it above
+      FC_ASSERT( recipient != message.code, "message::code handler is always called and shouldn't be included in recipient list" );
       try {
          apply_context recipient_ctx(*this,_db, trx, message, recipient);
          validate_message_precondition(recipient_ctx);
@@ -708,7 +709,8 @@ void chain_controller::create_block_summary(const signed_block& next_block) {
 }
 
 void chain_controller::update_global_properties(const signed_block& b) {
-   // If we're at the end of a round, update the BlockchainConfiguration and producer schedule
+   // If we're at the end of a round, update the BlockchainConfiguration, producer schedule
+   // and "producers" special account authority
    if (b.block_num() % config::BlocksPerRound == 0) {
       auto schedule = calculate_next_round(b);
       auto config = _admin->get_blockchain_configuration(_db, schedule);
@@ -717,6 +719,16 @@ void chain_controller::update_global_properties(const signed_block& b) {
       _db.modify(gpo, [schedule = std::move(schedule), config = std::move(config)] (global_property_object& gpo) {
          gpo.active_producers = std::move(schedule);
          gpo.configuration = std::move(config);
+      });
+
+      auto active_producers_authority = types::Authority(config::ProducersAuthorityThreshold, {}, {});
+      for(auto& name : gpo.active_producers) {
+         active_producers_authority.accounts.push_back({{name, config::ActiveName}, 1});
+      }
+
+      auto& po = _db.get<permission_object, by_owner>( boost::make_tuple(config::ProducersAccountName, config::ActiveName) );
+      _db.modify(po,[active_producers_authority] (permission_object& po) {
+         po.auth = active_producers_authority;
       });
    }
 }
@@ -1064,6 +1076,89 @@ void chain_controller::set_apply_handler( const AccountName& contract, const Acc
 
 chain_initializer_interface::~chain_initializer_interface() {}
 
+
+SignedTransaction chain_controller::transaction_from_variant( const fc::variant& v )const {
+   const variant_object& vo = v.get_object();
+#define GET_FIELD( VO, FIELD, RESULT ) \
+   if( VO.contains(#FIELD) ) fc::from_variant( VO[#FIELD], RESULT.FIELD )
+
+   SignedTransaction result;
+   GET_FIELD( vo, refBlockNum, result );
+   GET_FIELD( vo, refBlockPrefix, result );
+   GET_FIELD( vo, expiration, result );
+   GET_FIELD( vo, scope, result );
+   GET_FIELD( vo, signatures, result );
+
+   if( vo.contains( "messages" ) ) {
+      const vector<variant>& msgs = vo["messages"].get_array();
+      result.messages.resize( msgs.size() );
+      for( uint32_t i = 0; i <  msgs.size(); ++i ) {
+         const auto& vo = msgs[i].get_object();
+         GET_FIELD( vo, code, result.messages[i] );
+         GET_FIELD( vo, type, result.messages[i] );
+         GET_FIELD( vo, recipients, result.messages[i] );
+         GET_FIELD( vo, authorization, result.messages[i] );
+
+         if( vo.contains( "data" ) ) {
+            const auto& data = vo["data"];
+            if( data.is_string() ) {
+               GET_FIELD( vo, data, result.messages[i] );
+            } else if ( data.is_object() ) {
+               const auto& code_account = _db.get<account_object,by_name>( result.messages[i].code );
+               if( code_account.abi.size() > 4 ) { /// 4 == packsize of empty Abi
+                  fc::datastream<const char*> ds( code_account.abi.data(), code_account.abi.size() );
+                  hotc::types::Abi abi;
+                  fc::raw::unpack( ds, abi );
+                  types::AbiSerializer abis( abi );
+                  result.messages[i].data = abis.variantToBinary( abis.getActionType( result.messages[i].type ), data );
+               }
+            }
+         }
+      }
+   }
+   return result;
+#undef GET_FIELD
+}
+
+fc::variant  chain_controller::transaction_to_variant( const SignedTransaction& trx )const {
+#define SET_FIELD( MVO, OBJ, FIELD ) MVO(#FIELD, OBJ.FIELD)
+
+    fc::mutable_variant_object trx_mvo;
+    SET_FIELD( trx_mvo, trx, refBlockNum );
+    SET_FIELD( trx_mvo, trx, refBlockPrefix );
+    SET_FIELD( trx_mvo, trx, expiration );
+    SET_FIELD( trx_mvo, trx, scope );
+    SET_FIELD( trx_mvo, trx, signatures );
+
+    vector<fc::mutable_variant_object> msgs( trx.messages.size() );
+    vector<fc::variant> msgsv(msgs.size());
+
+    for( uint32_t i = 0; i < trx.messages.size(); ++i ) {
+       auto& msg_mvo = msgs[i];
+       auto& msg     = trx.messages[i];
+       SET_FIELD( msg_mvo, msg, code );
+       SET_FIELD( msg_mvo, msg, type );
+       SET_FIELD( msg_mvo, msg, recipients );
+       SET_FIELD( msg_mvo, msg, authorization );
+
+       const auto& code_account = _db.get<account_object,by_name>( msg.code );
+       if( code_account.abi.size() > 4 ) { /// 4 == packsize of empty Abi
+          fc::datastream<const char*> ds( code_account.abi.data(), code_account.abi.size() );
+          hotc::types::Abi abi;
+          fc::raw::unpack( ds, abi );
+          types::AbiSerializer abis( abi );
+          msg_mvo( "data", abis.binaryToVariant( abis.getActionType( msg.type ), msg.data ) );
+       }
+       else {
+         SET_FIELD( msg_mvo, msg, data );
+       }
+       msgsv[i] = std::move( msgs[i] );
+    }
+    trx_mvo( "messages", std::move(msgsv) );
+
+    return fc::variant( std::move( trx_mvo ) );
+#undef SET_FIELD
+}
 
 
 } }
