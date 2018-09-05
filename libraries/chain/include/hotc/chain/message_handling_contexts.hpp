@@ -1,12 +1,12 @@
 #pragma once
 
-#include <hotc/chain/message.hpp>
-#include <hotc/chain/transaction.hpp>
-#include <hotc/types/types.hpp>
+#include <omo/chain/message.hpp>
+#include <omo/chain/transaction.hpp>
+#include <omo/types/types.hpp>
 
 namespace chainbase { class database; }
 
-namespace hotc { namespace chain {
+namespace omo { namespace chain {
 
 class chain_controller;
 class message_validate_context {
@@ -88,8 +88,8 @@ class apply_context : public precondition_validate_context {
       int32_t store_i128i128( Name scope, Name table, uint128_t primary, uint128_t secondary,
                               const char* data, uint32_t len );
 
-      std::deque<hotc::chain::generated_transaction> applied; ///< sync calls made 
-      std::deque<hotc::chain::generated_transaction> generated; ///< async calls requested
+      std::deque<omo::chain::generated_transaction> applied; ///< sync calls made 
+      std::deque<omo::chain::generated_transaction> generated; ///< async calls requested
 
       chain_controller&    mutable_controller;
       chainbase::database& mutable_db;
@@ -99,4 +99,4 @@ using message_validate_handler = std::function<void(message_validate_context&)>;
 using precondition_validate_handler = std::function<void(precondition_validate_context&)>;
 using apply_handler = std::function<void(apply_context&)>;
 
-} } // namespace hotc::chain
+} } // namespace omo::chain
