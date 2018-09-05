@@ -4,8 +4,8 @@
  *
  */
 #pragma once
-#include <hotclib/math.hpp>
-#include <hotclib/print.hpp>
+#include <omolib/math.hpp>
+#include <omolib/print.hpp>
 
 /**
  *  @defgroup tokens Token API
@@ -17,14 +17,14 @@
 
 
 
-namespace hotc {
+namespace omo {
 
    /**
     *  @brief a uint64_t wrapper with checks for proper types and over/underflows.
     *
     *  @ingroup tokens
     */
-   template<typename NumberType, uint64_t CurrencyType = N(hotc) >
+   template<typename NumberType, uint64_t CurrencyType = N(omo) >
    struct token {
        static const uint64_t currency_type = CurrencyType;
 
@@ -66,7 +66,7 @@ namespace hotc {
        explicit operator bool()const { return quantity != 0; }
 
         inline void print() {
-           hotc::print( quantity, " ", Name(CurrencyType) );
+           omo::print( quantity, " ", Name(CurrencyType) );
         }
    };
 
@@ -102,13 +102,13 @@ namespace hotc {
       }
 
       friend QuoteToken operator / ( BaseToken b, const price& q ) {
-         hotc::print( "operator/ ", uint128(b.quantity), " * ", uint128( precision ), " / ", q.base_per_quote, "\n" );
+         omo::print( "operator/ ", uint128(b.quantity), " * ", uint128( precision ), " / ", q.base_per_quote, "\n" );
          return QuoteToken( uint64_t((uint128(b.quantity) * uint128(precision)   / q.base_per_quote)) );
       }
 
       friend BaseToken operator * ( const QuoteToken& b, const price& q ) {
-         hotc::print( "b: ", b, " \n" );
-         hotc::print( "operator* ", uint128(b.quantity), " * ", uint128( q.base_per_quote ), " / ", precision, "\n" );
+         omo::print( "b: ", b, " \n" );
+         omo::print( "operator* ", uint128(b.quantity), " * ", uint128( q.base_per_quote ), " / ", precision, "\n" );
          //return QuoteToken( uint64_t( mult_div_i128( b.quantity, q.base_per_quote, precision ) ) );
          return BaseToken( uint64_t((b.quantity * q.base_per_quote) / precision) );
       }
@@ -121,20 +121,20 @@ namespace hotc {
       friend bool operator != ( const price& a, const price& b ) { return a.base_per_quote != b.base_per_quote; }
 
       inline void print() {
-         hotc::print( base_per_quote, ".", " ", Name(base_token_type::currency_type), "/", Name(quote_token_type::currency_type)  );
+         omo::print( base_per_quote, ".", " ", Name(base_token_type::currency_type), "/", Name(quote_token_type::currency_type)  );
       }
       private:
       /**
        * represented as number of base tokens to purchase 1 quote token 
        */
-      hotc::uint128 base_per_quote; 
+      omo::uint128 base_per_quote; 
    };
 
-   typedef hotc::token<uint64_t,N(hotc)>   Tokens;
+   typedef omo::token<uint64_t,N(omo)>   Tokens;
 
 
    /**
-    *  @brief the binary structure of the `transfer` message type for the `hotc` contract.
+    *  @brief the binary structure of the `transfer` message type for the `omo` contract.
     *
     *  @ingroup tokens
     */
@@ -145,4 +145,4 @@ namespace hotc {
      AccountName  to;
      Tokens       quantity;
    };
-} // namespace hotc
+} // namespace omo

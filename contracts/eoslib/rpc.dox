@@ -1,16 +1,16 @@
 /**
-   @defgroup hotciorpc hotcd RPC Interface
-   @brief Describes how to interface with hotcd over HTTP RPC
+   @defgroup omoiorpc omod RPC Interface
+   @brief Describes how to interface with omod over HTTP RPC
 
-   `hotcd` uses a REST RPC interface where plugins can register their own endpoints with the API server. This page
+   `omod` uses a REST RPC interface where plugins can register their own endpoints with the API server. This page
    will explain how to use some of the APIs to get information about the blockchain and send transactions.
 
    @section chainrpc Chain API Configuration 
 
-   Before you can query `hotcd` you must first enable an API plugin. To do this add the following line to your `config.ini`
+   Before you can query `omod` you must first enable an API plugin. To do this add the following line to your `config.ini`
 
    ```
-   plugin = hotc::chain_api_plugin
+   plugin = omo::chain_api_plugin
    ```
 
    By default an HTTP server will start on `127.0.0.1:8888`; however, you can also change this with the following configureation line:
