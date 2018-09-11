@@ -1,44 +1,134 @@
 #pragma once
 #include <appbase/application.hpp>
-#include <hotc/chain/database.hpp>
+#include <hotc/chain/chain_controller.hpp>
+#include <hotc/chain/key_value_object.hpp>
+#include <hotc/chain/account_object.hpp>
 
-namespace hotc_hotc {
-   using hotc_hotc::chain::database;
+#include <hotc/database_plugin/database_plugin.hpp>
+
+namespace fc { class variant; }
+
+namespace hotc {
+   using hotc::chain::chain_controller;
    using std::unique_ptr;
    using namespace appbase;
+   using chain::Name;
+   using fc::optional;
 
 namespace chain_apis {
 struct empty{};
 
 class read_only {
-   const database& db;
+   const chain_controller& db;
 
 public:
-   read_only(const database& db)
+   read_only(const chain_controller& db)
       : db(db) {}
 
    using get_info_params = empty;
+
    struct get_info_results {
-      uint32_t head_block_num;
-      chain::block_id_type head_block_id;
-      fc::time_point_sec head_block_time;
-      chain::producer_id_type head_block_producer;
-      string recent_slots;
-      double participation_rate;
+      uint32_t              head_block_num = 0;
+      uint32_t              last_irreversible_block_num = 0;
+      chain::block_id_type  head_block_id;
+      fc::time_point_sec    head_block_time;
+      types::AccountName    head_block_producer;
+      string                recent_slots;
+      double                participation_rate = 0;
    };
    get_info_results get_info(const get_info_params&) const;
+
+   struct producer_info {
+      Name                       name;
+   };
+
+   struct get_account_results {
+      Name                       name;
+      uint64_t                   hotc_balance       = 0;
+      uint64_t                   staked_balance    = 0;
+      uint64_t                   unstaking_balance = 0;
+      fc::time_point_sec         last_unstaking_time;
+      optional<producer_info>    producer;
+      optional<types::Abi>       abi;
+   };
+   struct get_account_params {
+      Name name;
+   };
+   get_account_results get_account( const get_account_params& params )const;
+
+   struct abi_json_to_bin_params {
+      Name         code;
+      Name         action;
+      fc::variant  args;
+   };
+   struct abi_json_to_bin_result {
+      vector<char>   binargs;
+      vector<Name>   required_scope;
+      vector<Name>   required_auth;
+   };
+      
+   abi_json_to_bin_result abi_json_to_bin( const abi_json_to_bin_params& params )const;
+
+
 
    struct get_block_params {
       string block_num_or_id;
    };
-   using get_block_results = chain::signed_block;
+
+   struct get_block_results : public chain::signed_block {
+      get_block_results( const chain::signed_block& b )
+      :signed_block(b),
+      id(b.id()),
+      block_num(b.block_num()),
+      refBlockPrefix( id._hash[1] )
+      {}
+
+      chain::block_id_type id;
+      uint32_t             block_num = 0;
+      uint32_t             refBlockPrefix = 0;
+   };
+
    get_block_results get_block(const get_block_params& params) const;
+
+   struct get_table_rows_i64_params {
+      bool        json = false;
+      Name        scope;
+      Name        code;
+      Name        table;
+      uint64_t    lower_bound = 0;
+      uint64_t    upper_bound = uint64_t(-1);
+      uint32_t    limit = 10;
+   };
+
+   struct get_table_rows_i64_result {
+      vector<fc::variant> rows; ///< one row per item, either encoded as hex String or JSON object 
+      bool                more; ///< true if last element in data is not the end and sizeof data() < limit
+   };
+
+   get_table_rows_i64_result get_table_rows_i64( const get_table_rows_i64_params& params )const;
+};
+
+class read_write {
+   chain_controller& db;
+public:
+   read_write(chain_controller& db) : db(db) {}
+
+   using push_block_params = chain::signed_block;
+   using push_block_results = empty;
+   push_block_results push_block(const push_block_params& params);
+
+   using push_transaction_params = chain::SignedTransaction;
+   struct push_transaction_results {
+      chain::transaction_id_type  transaction_id;
+      fc::variant                 processed;
+   };
+   push_transaction_results push_transaction(const push_transaction_params& params);
 };
 } // namespace chain_apis
 
 class chain_plugin : public plugin<chain_plugin> {
 public:
-   APPBASE_PLUGIN_REQUIRES()
+   APPBASE_PLUGIN_REQUIRES((database_plugin))
 
    chain_plugin();
    virtual ~chain_plugin();
@@ -49,17 +139,20 @@ public:
    void plugin_startup();
    void plugin_shutdown();
 
-   chain_apis::read_only get_read_only_api() const {
-      return chain_apis::read_only(db());
-   }
+   chain_apis::read_only get_read_only_api() const { return chain_apis::read_only(chain()); }
+   chain_apis::read_write get_read_write_api() { return chain_apis::read_write(chain()); }
 
    bool accept_block(const chain::signed_block& block, bool currently_syncing);
-   void accept_transaction(const chain::signed_transaction& trx);
+   void accept_transaction(const chain::SignedTransaction& trx);
 
    bool block_is_on_preferred_chain(const chain::block_id_type& block_id);
 
-   database& db();
-   const database& db() const;
+   // Only call this after plugin_startup()!
+   chain_controller& chain();
+   // Only call this after plugin_startup()!
+   const chain_controller& chain() const;
+
+  void get_chain_id (chain::chain_id_type &cid) const;
 
 private:
    unique_ptr<class chain_plugin_impl> my;
@@ -67,82 +160,20 @@ private:
 
 }
 
-FC_REFLECT(hotc_hotc::chain_apis::empty, )
-FC_REFLECT(hotc_hotc::chain_apis::read_only::get_info_results,
-           (head_block_num)(head_block_id)(head_block_time)(head_block_producer)
+FC_REFLECT(hotc::chain_apis::empty, )
+FC_REFLECT(hotc::chain_apis::read_only::get_info_results,
+           (head_block_num)(last_irreversible_block_num)(head_block_id)(head_block_time)(head_block_producer)
            (recent_slots)(participation_rate))
-FC_REFLECT(hotc_hotc::chain_apis::read_only::get_block_params, (block_num_or_id))
-#pragma once
-#include <appbase/application.hpp>
-#include <hotc_hotc/chain/database.hpp>
+FC_REFLECT(hotc::chain_apis::read_only::get_block_params, (block_num_or_id))
 
-namespace hotc_hotc {
-   using hotc_hotc::chain::database;
-   using std::unique_ptr;
-   using namespace appbase;
-
-namespace chain_apis {
-struct empty{};
-
-class read_only {
-   const database& db;
-
-public:
-   read_only(const database& db)
-      : db(db) {}
-
-   using get_info_params = empty;
-   struct get_info_results {
-      uint32_t head_block_num;
-      chain::block_id_type head_block_id;
-      fc::time_point_sec head_block_time;
-      chain::producer_id_type head_block_producer;
-      string recent_slots;
-      double participation_rate;
-   };
-   get_info_results get_info(const get_info_params&) const;
-
-   struct get_block_params {
-      string block_num_or_id;
-   };
-   using get_block_results = chain::signed_block;
-   get_block_results get_block(const get_block_params& params) const;
-};
-} // namespace chain_apis
-
-class chain_plugin : public plugin<chain_plugin> {
-public:
-   APPBASE_PLUGIN_REQUIRES()
-
-   chain_plugin();
-   virtual ~chain_plugin();
-
-   virtual void set_program_options(options_description& cli, options_description& cfg) override;
-
-   void plugin_initialize(const variables_map& options);
-   void plugin_startup();
-   void plugin_shutdown();
-
-   chain_apis::read_only get_read_only_api() const {
-      return chain_apis::read_only(db());
-   }
-
-   bool accept_block(const chain::signed_block& block, bool currently_syncing);
-   void accept_transaction(const chain::signed_transaction& trx);
-
-   bool block_is_on_preferred_chain(const chain::block_id_type& block_id);
-
-   database& db();
-   const database& db() const;
-
-private:
-   unique_ptr<class chain_plugin_impl> my;
-};
-
-}
-
-FC_REFLECT(hotc_hotc::chain_apis::empty, )
-FC_REFLECT(hotc_hotc::chain_apis::read_only::get_info_results,
-           (head_block_num)(head_block_id)(head_block_time)(head_block_producer)
-           (recent_slots)(participation_rate))
-FC_REFLECT(hotc_hotc::chain_apis::read_only::get_block_params, (block_num_or_id))
+FC_REFLECT_DERIVED( hotc::chain_apis::read_only::get_block_results, (hotc::chain::signed_block), (id)(block_num)(refBlockPrefix) );
+FC_REFLECT( hotc::chain_apis::read_write::push_transaction_results, (transaction_id)(processed) )
+FC_REFLECT( hotc::chain_apis::read_only::get_table_rows_i64_params,
+           (json)(scope)(code)(table)(lower_bound)(upper_bound)(limit) );
+FC_REFLECT( hotc::chain_apis::read_only::get_table_rows_i64_result,
+           (rows)(more) );
+FC_REFLECT( hotc::chain_apis::read_only::get_account_results, (name)(hotc_balance)(staked_balance)(unstaking_balance)(last_unstaking_time)(producer)(abi) )
+FC_REFLECT( hotc::chain_apis::read_only::get_account_params, (name) )
+FC_REFLECT( hotc::chain_apis::read_only::producer_info, (name) )
+FC_REFLECT( hotc::chain_apis::read_only::abi_json_to_bin_params, (code)(action)(args) )
+FC_REFLECT( hotc::chain_apis::read_only::abi_json_to_bin_result, (binargs)(required_scope)(required_auth) )

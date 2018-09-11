@@ -1,49 +1,63 @@
 #include <hotc/chain_plugin/chain_plugin.hpp>
+#include <hotc/chain/fork_database.hpp>
+#include <hotc/chain/block_log.hpp>
 #include <hotc/chain/exceptions.hpp>
+#include <hotc/chain/producer_object.hpp>
+#include <hotc/chain/config.hpp>
+
+#include <hotc/native_contract/native_contract_chain_initializer.hpp>
+#include <hotc/native_contract/native_contract_chain_administrator.hpp>
+#include <hotc/native_contract/staked_balance_objects.hpp>
+#include <hotc/native_contract/balance_object.hpp>
+#include <hotc/native_contract/genesis_state.hpp>
+#include <hotc/types/AbiSerializer.hpp>
+
 #include <fc/io/json.hpp>
+#include <fc/variant.hpp>
 
 namespace hotc {
 
 using namespace hotc;
 using fc::flat_map;
 using chain::block_id_type;
+using chain::fork_database;
+using chain::block_log;
+using chain::chain_id_type;
+using chain::account_object;
+using chain::key_value_object;
+using chain::by_name;
+using chain::by_scope_key;
+
 
 class chain_plugin_impl {
-   public:
-      uint64_t                         shared_memory_size = 0;
-      bfs::path                        shared_memory_dir;
-      bfs::path                        genesis_file;
-      bool                             replay = false;
-      bool                             reset   = false;
-      bool                             readonly = false;
-      uint32_t                         flush_interval = 0;
-      flat_map<uint32_t,block_id_type> loaded_checkpoints;
+public:
+   bfs::path                        block_log_dir;
+   bfs::path                        genesis_file;
+   chain::Time                      genesis_timestamp;
+   bool                             readonly = false;
+   flat_map<uint32_t,block_id_type> loaded_checkpoints;
 
-      database  db;
+   fc::optional<fork_database>      fork_db;
+   fc::optional<block_log>          block_logger;
+   fc::optional<chain_controller>   chain;
+   chain_id_type                    chain_id;
 };
 
 
 chain_plugin::chain_plugin()
-:my( new chain_plugin_impl() ) {
+:my(new chain_plugin_impl()) {
 }
 
 chain_plugin::~chain_plugin(){}
 
-database& chain_plugin::db() { return my->db; }
-const chain::database& chain_plugin::db() const { return my->db; }
-
 void chain_plugin::set_program_options(options_description& cli, options_description& cfg)
 {
    cfg.add_options()
-         ("readonly", bpo::value<bool>()->default_value(false), "open the database in read only mode")
-         ("shared-file-dir", bpo::value<bfs::path>()->default_value("blockchain"), 
-            "the location of the chain shared memory files (absolute path or relative to application data dir)")
-         ("shared-file-size", bpo::value<uint64_t>()->default_value(8*1024),
-            "Minimum size MB of database shared memory file")
          ("genesis-json", bpo::value<boost::filesystem::path>(), "File to read Genesis State from")
+     ("genesis-timestamp", bpo::value<string>(), "override the initial timestamp in the Genesis State file")
+         ("block-log-dir", bpo::value<bfs::path>()->default_value("blocks"),
+          "the location of the block log (absolute path or relative to application data dir)")
          ("checkpoint,c", bpo::value<vector<string>>()->composing(), "Pairs of [BLOCK_NUM,BLOCK_ID] that should be enforced as checkpoints.")
-         ("flush-state-interval", bpo::value<uint32_t>()->default_value(0), 
-          "flush shared memory changes to disk every N blocks")
          ;
    cli.add_options()
          ("replay-blockchain", bpo::bool_switch()->default_value(false),
@@ -55,23 +69,42 @@ void chain_plugin::set_program_options(options_description& cli, options_descrip
 
 void chain_plugin::plugin_initialize(const variables_map& options) {
    ilog("initializing chain plugin");
-   my->shared_memory_dir = app().data_dir() / "blockchain";
 
    if(options.count("genesis-json")) {
       my->genesis_file = options.at("genesis-json").as<bfs::path>();
    }
-   if(options.count("shared-file-dir")) {
-      auto sfd = options.at("shared-file-dir").as<bfs::path>();
-      if(sfd.is_relative())
-         my->shared_memory_dir = app().data_dir() / sfd;
-      else
-         my->shared_memory_dir = sfd;
+   if(options.count("genesis-timestamp")) {
+     string tstr = options.at("genesis-timestamp").as<string>();
+     if (strcasecmp (tstr.c_str(), "now") == 0) {
+       my->genesis_timestamp = fc::time_point::now();
+       auto diff = my->genesis_timestamp.sec_since_epoch() % config::BlockIntervalSeconds;
+       if (diff > 0) {
+         auto delay =  (config::BlockIntervalSeconds - diff);
+         my->genesis_timestamp += delay;
+         dlog ("pausing ${s} seconds to the next interval",("s",delay));
+       }
+     }
+     else {
+       my->genesis_timestamp = chain::Time::from_iso_string (tstr);
+     }
    }
-   my->shared_memory_size = options.at("shared-file-size").as<uint64_t>() * 1024 * 1024;
-   my->readonly = options.at("readonly").as<bool>();
-   my->replay   = options.at("replay-blockchain").as<bool>();
-   my->reset    = options.at("resync-blockchain").as<bool>();
-   my->flush_interval = options.at("flush-state-interval").as<uint32_t>();
+   if (options.count("block-log-dir")) {
+      auto bld = options.at("block-log-dir").as<bfs::path>();
+      if(bld.is_relative())
+         my->block_log_dir = app().data_dir() / bld;
+      else
+         my->block_log_dir = bld;
+   }
+
+   if (options.at("replay-blockchain").as<bool>()) {
+      ilog("Replay requested: wiping database");
+      app().get_plugin<database_plugin>().wipe_database();
+   }
+   if (options.at("resync-blockchain").as<bool>()) {
+      ilog("Resync requested: wiping blocks");
+      app().get_plugin<database_plugin>().wipe_database();
+      fc::remove_all(my->block_log_dir);
+   }
 
    if(options.count("checkpoint"))
    {
@@ -85,42 +118,38 @@ void chain_plugin::plugin_initialize(const variables_map& options) {
    }
 }
 
-void chain_plugin::plugin_startup() {
-   auto genesis_loader = [this] {
-      return fc::json::from_file(my->genesis_file).as<hotc::chain::genesis_state_type>();
-   };
+void chain_plugin::plugin_startup() 
+{ try {
+   auto& db = app().get_plugin<database_plugin>().db();
+
+   FC_ASSERT( fc::exists( my->genesis_file ), 
+              "unable to find genesis file '${f}', check --genesis-json argument", 
+              ("f",my->genesis_file.generic_string()) );
+
+   auto genesis = fc::json::from_file(my->genesis_file).as<native_contract::genesis_state_type>();
+   if (my->genesis_timestamp.sec_since_epoch() > 0) {
+     genesis.initial_timestamp = my->genesis_timestamp;
+   }
+
+   native_contract::native_contract_chain_initializer initializer(genesis);
+
+   my->fork_db = fork_database();
+   my->block_logger = block_log(my->block_log_dir);
+   my->chain_id = genesis.compute_chain_id();
+   my->chain = chain_controller(db, *my->fork_db, *my->block_logger,
+                                initializer, native_contract::make_administrator());
 
    if(!my->readonly) {
       ilog("starting chain in read/write mode");
-      if(my->reset) {
-         wlog("resync requested: deleting block log and shared memory");
-         my->db.wipe(my->shared_memory_dir, true);
-      }
-      //     my->db.set_flush_interval(my->flush_interval);
-      my->db.add_checkpoints(my->loaded_checkpoints);
-
-      if(my->replay) {
-         ilog("Replaying blockchain on user request.");
-         my->db.replay(my->shared_memory_dir, my->shared_memory_size, genesis_loader());
-      } else {
-         try {
-            ilog("Opening shared memory from ${path}", ("path",my->shared_memory_dir.generic_string()));
-            my->db.open(my->shared_memory_dir, my->shared_memory_size, genesis_loader);
-         } catch (const fc::exception& e) {
-            wlog("Error opening database, attempting to replay blockchain. Error: ${e}", ("e", e));
-            my->db.replay(my->shared_memory_dir, my->shared_memory_size, genesis_loader());
-         }
-      }
-   } else {
-      ilog("Starting chain in read mode.");
-      my->db.open(my->shared_memory_dir, my->shared_memory_size, genesis_loader);
+      my->chain->add_checkpoints(my->loaded_checkpoints);
    }
-}
+
+   ilog("Blockchain started; head block is #${num}, genesis timestamp is ${ts}",
+        ("num", my->chain->head_block_num())("ts", genesis.initial_timestamp.to_iso_string()));
+
+} FC_CAPTURE_AND_RETHROW( (my->genesis_file.generic_string()) ) }
 
 void chain_plugin::plugin_shutdown() {
-   ilog("closing chain database");
-   my->db.close();
-   ilog("database closed successfully");
 }
 
 bool chain_plugin::accept_block(const chain::signed_block& block, bool currently_syncing) {
@@ -131,26 +160,34 @@ bool chain_plugin::accept_block(const chain::signed_block& block, bool currently
            ("p", block.producer));
    }
 
-   return db().push_block(block);
+   return chain().push_block(block);
 }
 
-void chain_plugin::accept_transaction(const chain::signed_transaction& trx) {
-   db().push_transaction(trx);
+void chain_plugin::accept_transaction(const chain::SignedTransaction& trx) {
+   chain().push_transaction(trx);
 }
 
 bool chain_plugin::block_is_on_preferred_chain(const chain::block_id_type& block_id) {
    // If it's not known, it's not preferred.
-   if (!db().is_known_block(block_id)) return false;
+   if (!chain().is_known_block(block_id)) return false;
    // Extract the block number from block_id, and fetch that block number's ID from the database.
    // If the database's block ID matches block_id, then block_id is on the preferred chain. Otherwise, it's on a fork.
-   return db().get_block_id_for_num(chain::block_header::num_from_id(block_id)) == block_id;
+   return chain().get_block_id_for_num(chain::block_header::num_from_id(block_id)) == block_id;
 }
+
+chain_controller& chain_plugin::chain() { return *my->chain; }
+const chain::chain_controller& chain_plugin::chain() const { return *my->chain; }
+
+  void chain_plugin::get_chain_id (chain_id_type &cid)const {
+    memcpy (cid.data(), my->chain_id.data(), cid.data_size());
+  }
 
 namespace chain_apis {
 
 read_only::get_info_results read_only::get_info(const read_only::get_info_params&) const {
    return {
       db.head_block_num(),
+      db.last_irreversible_block_num(),
       db.head_block_id(),
       db.head_block_time(),
       db.head_block_producer(),
@@ -159,6 +196,104 @@ read_only::get_info_results read_only::get_info(const read_only::get_info_params
    };
 }
 
+read_only::get_table_rows_i64_result read_only::get_table_rows_i64( const read_only::get_table_rows_i64_params& p )const {
+   read_only::get_table_rows_i64_result result;
+   const auto& d = db.get_database();
+   const auto& code_account = d.get<account_object,by_name>( p.code );
+
+   types::AbiSerializer abis;
+   if( code_account.abi.size() > 4 ) { /// 4 == packsize of empty Abi
+      hotc::types::Abi abi;
+      fc::datastream<const char*> ds( code_account.abi.data(), code_account.abi.size() );
+      fc::raw::unpack( ds, abi );
+      abis.setAbi( abi );
+   }
+
+   const auto& idx = d.get_index<chain::key_value_index,by_scope_key>();
+   auto lower = idx.lower_bound( boost::make_tuple( p.scope, p.code, p.table, p.lower_bound ) );
+   auto upper = idx.upper_bound( boost::make_tuple( p.scope, p.code, p.table, p.upper_bound ) );
+
+   vector<char> data;
+
+   auto start = fc::time_point::now();
+   auto end   = fc::time_point::now() + fc::microseconds( 1000*10 ); /// 10ms max time
+
+   int count = 0;
+   auto itr = lower;
+   for( itr = lower; itr != upper; ++itr ) {
+      data.resize( sizeof(uint64_t) + itr->value.size() );
+      memcpy( data.data(), &itr->key, sizeof(itr->key) );
+      memcpy( data.data()+sizeof(uint64_t), itr->value.data(), itr->value.size() );
+
+      if( p.json ) 
+         result.rows.emplace_back( abis.binaryToVariant( abis.getTableType(p.table), data ) );
+      else
+         result.rows.emplace_back( fc::variant(data) );
+      if( ++count == p.limit || fc::time_point::now() > end )
+         break;
+   }
+   if( itr != upper ) 
+      result.more = true;
+   return result;
+}
+
+read_only::get_block_results read_only::get_block(const read_only::get_block_params& params) const {
+   try {
+      if (auto block = db.fetch_block_by_id(fc::json::from_string(params.block_num_or_id).as<chain::block_id_type>()))
+         return *block;
+   } catch (fc::bad_cast_exception) {/* do nothing */}
+   try {
+      if (auto block = db.fetch_block_by_number(fc::to_uint64(params.block_num_or_id)))
+         return *block;
+   } catch (fc::bad_cast_exception) {/* do nothing */}
+
+   FC_THROW_EXCEPTION(chain::unknown_block_exception,
+                      "Could not find block: ${block}", ("block", params.block_num_or_id));
+}
+
+read_write::push_block_results read_write::push_block(const read_write::push_block_params& params) {
+   db.push_block(params);
+   return read_write::push_block_results();
+}
+
+read_write::push_transaction_results read_write::push_transaction(const read_write::push_transaction_params& params) {
+   auto ptrx = db.push_transaction(params);
+   auto pretty_trx = db.transaction_to_variant( ptrx );
+   return read_write::push_transaction_results{ params.id(), pretty_trx };
+}
+
+read_only::get_account_results read_only::get_account( const get_account_params& params )const {
+   using namespace native::hotc;
+
+   get_account_results result;
+   result.name = params.name;
+
+   const auto& d = db.get_database();
+   const auto& accnt          = d.get<account_object,by_name>( params.name );
+   const auto& balance        = d.get<BalanceObject,byOwnerName>( params.name );
+   const auto& staked_balance = d.get<StakedBalanceObject,byOwnerName>( params.name );
+
+   if( accnt.abi.size() > 4 ) {
+      hotc::types::Abi abi;
+      fc::datastream<const char*> ds( accnt.abi.data(), accnt.abi.size() );
+      fc::raw::unpack( ds, abi );
+      result.abi = std::move(abi);
+   }
+
+   result.hotc_balance          = balance.balance;
+   result.staked_balance       = staked_balance.stakedBalance;
+   result.unstaking_balance    = staked_balance.unstakingBalance;
+   result.last_unstaking_time  = staked_balance.lastUnstakingTime;
+
+
+   return result;
+}
+read_only::abi_json_to_bin_result read_only::abi_json_to_bin( const read_only::abi_json_to_bin_params& params )const {
+   abi_json_to_bin_result result;
+   idump((params));
+   result.binargs = db.message_to_binary( params.code, params.action, params.args );
+   return result;
+}
+
 } // namespace chain_apis
 } // namespace hotc
-
