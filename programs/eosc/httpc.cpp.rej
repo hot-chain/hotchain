@@ -1,0 +1,12 @@
+diff a/programs/eosc/httpc.cpp b/programs/eosc/httpc.cpp	(rejected hunks)
+@@ -23,6 +23,10 @@
+                    const std::string& path,
+                    const fc::variant& postdata ) 
+  { try {
+++<<<<<<< HEAD
+++=======
++    idump((postdata));
+++>>>>>>> 04f03ff... 新增对调用合同支持
+  
+      std::string postjson;
+      if( !postdata.is_null() )
