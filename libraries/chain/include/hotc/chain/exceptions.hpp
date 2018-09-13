@@ -24,46 +24,8 @@
 #pragma once
 
 #include <fc/exception/exception.hpp>
-#include <hotc/chain/protocol/protocol.hpp>
-
-#define HOTC_ASSERT( expr, exc_type, FORMAT, ... )                \
-   FC_MULTILINE_MACRO_BEGIN                                           \
-   if( !(expr) )                                                      \
-      FC_THROW_EXCEPTION( exc_type, FORMAT, __VA_ARGS__ );            \
-   FC_MULTILINE_MACRO_END
-
-
-#define HOTC_DECLARE_OP_BASE_EXCEPTIONS( op_name )                \
-   FC_DECLARE_DERIVED_EXCEPTION(                                      \
-      op_name ## _validate_exception,                                 \
-      hotc::chain::message_validate_exception,                  \
-      3040000 + 100 * operation::tag< op_name ## _operation >::value, \
-      #op_name "_operation validation exception"                      \
-      )                                                               \
-   FC_DECLARE_DERIVED_EXCEPTION(                                      \
-      op_name ## _evaluate_exception,                                 \
-      hotc::chain::message_evaluate_exception,                  \
-      3050000 + 100 * operation::tag< op_name ## _operation >::value, \
-      #op_name "_operation evaluation exception"                      \
-      )
-
-#define HOTC_DECLARE_OP_VALIDATE_EXCEPTION( exc_name, op_name, seqnum, msg ) \
-   FC_DECLARE_DERIVED_EXCEPTION(                                      \
-      op_name ## _ ## exc_name,                                       \
-      hotc::chain::op_name ## _validate_exception,                \
-      3040000 + 100 * operation::tag< op_name ## _operation >::value  \
-         + seqnum,                                                    \
-      msg                                                             \
-      )
-
-#define HOTC_DECLARE_OP_EVALUATE_EXCEPTION( exc_name, op_name, seqnum, msg ) \
-   FC_DECLARE_DERIVED_EXCEPTION(                                      \
-      op_name ## _ ## exc_name,                                       \
-      hotc::chain::op_name ## _evaluate_exception,                \
-      3050000 + 100 * operation::tag< op_name ## _operation >::value  \
-         + seqnum,                                                    \
-      msg                                                             \
-      )
+#include <hotc/chain/protocol.hpp>
+#include <hotc/utilities/exception_macros.hpp>
 
 namespace hotc { namespace chain {
 
@@ -80,13 +42,14 @@ namespace hotc { namespace chain {
    FC_DECLARE_DERIVED_EXCEPTION( black_swan_exception,              hotc::chain::chain_exception, 3100000, "black swan" )
    FC_DECLARE_DERIVED_EXCEPTION( unknown_block_exception,           hotc::chain::chain_exception, 3110000, "unknown block" )
 
-   FC_DECLARE_DERIVED_EXCEPTION( tx_missing_active_auth,            hotc::chain::transaction_exception, 3030001, "missing required active authority" )
-   FC_DECLARE_DERIVED_EXCEPTION( tx_missing_owner_auth,             hotc::chain::transaction_exception, 3030002, "missing required owner authority" )
-   FC_DECLARE_DERIVED_EXCEPTION( tx_missing_other_auth,             hotc::chain::transaction_exception, 3030003, "missing required other authority" )
+   FC_DECLARE_DERIVED_EXCEPTION( tx_missing_auth,                   hotc::chain::transaction_exception, 3030001, "missing required authority" )
    FC_DECLARE_DERIVED_EXCEPTION( tx_irrelevant_sig,                 hotc::chain::transaction_exception, 3030004, "irrelevant signature included" )
    FC_DECLARE_DERIVED_EXCEPTION( tx_duplicate_sig,                  hotc::chain::transaction_exception, 3030005, "duplicate signature included" )
    FC_DECLARE_DERIVED_EXCEPTION( invalid_committee_approval,        hotc::chain::transaction_exception, 3030006, "committee account cannot directly approve transaction" )
    FC_DECLARE_DERIVED_EXCEPTION( insufficient_fee,                  hotc::chain::transaction_exception, 3030007, "insufficient fee" )
+   FC_DECLARE_DERIVED_EXCEPTION( tx_missing_scope,                  hotc::chain::transaction_exception, 3030008, "missing required scope" )
+   FC_DECLARE_DERIVED_EXCEPTION( tx_missing_recipient,              hotc::chain::transaction_exception, 3030009, "missing required recipient" )
+   FC_DECLARE_DERIVED_EXCEPTION( checktime_exceeded,                hotc::chain::transaction_exception, 3030010, "allotted processing time was exceeded" )
 
    FC_DECLARE_DERIVED_EXCEPTION( invalid_pts_address,               hotc::chain::utility_exception, 3060001, "invalid pts address" )
    FC_DECLARE_DERIVED_EXCEPTION( insufficient_feeds,                hotc::chain::chain_exception, 37006, "insufficient feeds" )
@@ -189,4 +152,3 @@ namespace hotc { namespace chain {
       { throw( effect_type( e.what(), e.get_log() ) ); }
 
 } } // hotc::chain
-
