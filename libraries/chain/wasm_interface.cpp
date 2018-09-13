@@ -10,6 +10,7 @@
 #include "IR/Validate.h"
 #include <hotc/chain/key_value_object.hpp>
 #include <hotc/chain/account_object.hpp>
+#include <chrono>
 
 namespace hotc { namespace chain {
    using namespace IR;
@@ -17,6 +18,20 @@ namespace hotc { namespace chain {
 
    wasm_interface::wasm_interface() {
    }
+
+#ifdef NDEBUG
+   const int CHECKTIME_LIMIT = 2000;
+#else
+   const int CHECKTIME_LIMIT = 12000;
+#endif
+
+DEFINE_INTRINSIC_FUNCTION0(env,checktime,checktime,none) {
+   auto dur = wasm_interface::get().current_execution_time();
+   if (dur > CHECKTIME_LIMIT) {
+      wlog("checktime called ${d}", ("d", dur));
+      throw checktime_exceeded();
+   }
+}
 
 DEFINE_INTRINSIC_FUNCTION2(env,multeq_i128,multeq_i128,none,i32,self,i32,other) {
    auto& wasm  = wasm_interface::get();
@@ -146,11 +161,11 @@ DEFINE_INTRINSIC_FUNCTION1(env,requireAuth,requireAuth,none,i64,account) {
 }
 
 DEFINE_INTRINSIC_FUNCTION1(env,requireNotice,requireNotice,none,i64,account) {
-   wasm_interface::get().current_validate_context->require_recipient( account );
+   wasm_interface::get().current_apply_context->require_recipient( account );
 }
 
 DEFINE_INTRINSIC_FUNCTION1(env,hasRecipient,hasRecipient,i32,i64,account) {
-   return wasm_interface::get().current_validate_context->has_recipient( account );
+   return wasm_interface::get().current_apply_context->has_recipient( account );
 }
 DEFINE_INTRINSIC_FUNCTION1(env,hasAuth,hasAuth,i32,i64,account) {
    return wasm_interface::get().current_validate_context->has_authorization( account );
@@ -223,7 +238,7 @@ DEFINE_INTRINSIC_FUNCTION2(env,send,send,i32,i32,trx_buffer, i32,trx_buffer_size
    FC_ASSERT( wasm.current_apply_context, "not in apply context" );
 
    fc::datastream<const char*> ds(buffer, trx_buffer_size );
-   hotc::chain::generated_transaction gtrx;
+   hotc::chain::GeneratedTransaction gtrx;
    hotc::chain::Transaction& trx = gtrx;
    fc::raw::unpack( ds, trx );
 
@@ -242,7 +257,7 @@ DEFINE_INTRINSIC_FUNCTION2(env,send,send,i32,i32,trx_buffer, i32,trx_buffer_size
  *   a per-thread global.
  **/
 
-   wasm.current_apply_context->generated.emplace_back( std::move(gtrx) );
+//   wasm.current_apply_context->generated.emplace_back( std::move(gtrx) );
 
    return 0;
 }
@@ -337,6 +352,11 @@ DEFINE_INTRINSIC_FUNCTION1(env,free,free,none,i32,ptr) {
      }
    };
 
+   int64_t wasm_interface::current_execution_time()
+   {
+      return (fc::time_point::now() - checktimeStart).count();
+   }
+
 
    char* wasm_interface::vm_allocate( int bytes ) {
       FunctionInstance* alloc_function = asFunctionNullable(getInstanceExport(current_module,"alloc"));
@@ -344,6 +364,8 @@ DEFINE_INTRINSIC_FUNCTION1(env,free,free,none,i32,ptr) {
       FC_ASSERT( functionType->parameters.size() == 1 );
       std::vector<Value> invokeArgs(1);
       invokeArgs[0] = U32(bytes);
+
+      checktimeStart = fc::time_point::now();
 
       auto result = Runtime::invokeFunction(alloc_function,invokeArgs);
 
@@ -380,6 +402,8 @@ DEFINE_INTRINSIC_FUNCTION1(env,free,free,none,i32,ptr) {
          memset( memstart + state.mem_end, 0, ((1<<16) - state.mem_end) );
          memcpy( memstart, state.init_memory.data(), state.mem_end);
 
+         checktimeStart = fc::time_point::now();
+
          Runtime::invokeFunction(call,args);
       } catch( const Runtime::Exception& e ) {
           edump((std::string(describeExceptionCause(e.cause))));
@@ -388,9 +412,7 @@ DEFINE_INTRINSIC_FUNCTION1(env,free,free,none,i32,ptr) {
       }
    } FC_CAPTURE_AND_RETHROW( (name)(current_validate_context->msg.type) ) }
 
-   void  wasm_interface::vm_precondition() { vm_call("precondition" ); } 
-   void  wasm_interface::vm_apply()        { vm_call("apply" );        }
-   void  wasm_interface::vm_validate()     { vm_call("validate");       }
+   void  wasm_interface::vm_apply()        { vm_call("apply" );          }
 
    void  wasm_interface::vm_onInit()
    { try {
@@ -401,6 +423,8 @@ DEFINE_INTRINSIC_FUNCTION1(env,free,free,none,i32,ptr) {
                elog( "no onInit method found" );
                return; /// if not found then it is a no-op
          }
+
+         checktimeStart = fc::time_point::now();
 
             const FunctionType* functionType = getFunctionType(apply);
             FC_ASSERT( functionType->parameters.size() == 0 );
@@ -416,22 +440,25 @@ DEFINE_INTRINSIC_FUNCTION1(env,free,free,none,i32,ptr) {
    } FC_CAPTURE_AND_RETHROW() }
 
    void wasm_interface::validate( message_validate_context& c ) {
-
+      /*
       current_validate_context       = &c;
       current_precondition_context   = nullptr;
       current_apply_context          = nullptr;
 
       load( c.code, c.db );
       vm_validate();
+      */
    }
    void wasm_interface::precondition( precondition_validate_context& c ) {
    try {
 
+      /*
       current_validate_context       = &c;
       current_precondition_context   = &c;
 
       load( c.code, c.db );
       vm_precondition();
+      */
 
    } FC_CAPTURE_AND_RETHROW() }
 
@@ -480,7 +507,7 @@ DEFINE_INTRINSIC_FUNCTION1(env,free,free,none,i32,ptr) {
           wlog( "LOADING CODE" );
           auto start = fc::time_point::now();
           Serialization::MemoryInputStream stream((const U8*)recipient.code.data(),recipient.code.size());
-          WASM::serialize(stream,*state.module);
+          WASM::serializeWithInjection(stream,*state.module);
 
           RootResolver rootResolver;
           LinkResult linkResult = linkModule(*state.module,rootResolver);
