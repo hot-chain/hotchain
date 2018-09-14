@@ -39,7 +39,7 @@ macro(add_wast_target target SOURCE_FILES INCLUDE_FOLDERS DESTINATION_FOLDER)
 
     add_custom_command(OUTPUT ${outfile}.bc
       DEPENDS ${infile}
-      COMMAND ${WASM_CLANG} -emit-llvm -O3 --std=c++14 --target=wasm32 -I ${INCLUDE_FOLDERS} -fno-threadsafe-statics -fno-rtti -fno-exceptions -c ${infile} -o ${outfile}.bc
+      COMMAND ${WASM_CLANG} -emit-llvm -O3 --std=c++14 --target=wasm32 -fno-builtin -ffreestanding -nostdlib -I ${INCLUDE_FOLDERS} -fno-threadsafe-statics -fno-rtti -fno-exceptions -c ${infile} -o ${outfile}.bc
       IMPLICIT_DEPENDS CXX ${infile}
       COMMENT "Building LLVM bitcode ${outfile}.bc"
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -80,7 +80,7 @@ macro(add_wast_target target SOURCE_FILES INCLUDE_FOLDERS DESTINATION_FOLDER)
 
   add_custom_command(OUTPUT ${DESTINATION_FOLDER}/${target}.wast.hpp
     DEPENDS ${DESTINATION_FOLDER}/${target}.wast
-    COMMAND echo "const char* currency_wast = R\"=====("  > ${DESTINATION_FOLDER}/${target}.wast.hpp
+    COMMAND echo "const char* ${target}_wast = R\"=====("  > ${DESTINATION_FOLDER}/${target}.wast.hpp
     COMMAND cat ${DESTINATION_FOLDER}/${target}.wast >> ${DESTINATION_FOLDER}/${target}.wast.hpp
     COMMAND echo ")=====\";"  >> ${DESTINATION_FOLDER}/${target}.wast.hpp
     COMMENT "Generating ${target}.wast.hpp"
@@ -88,5 +88,7 @@ macro(add_wast_target target SOURCE_FILES INCLUDE_FOLDERS DESTINATION_FOLDER)
   )
 
   add_custom_target(${target} ALL DEPENDS ${DESTINATION_FOLDER}/${target}.wast.hpp)
+  set_property(TARGET ${target} PROPERTY INCLUDE_DIRECTORIES ${INCLUDE_FOLDERS})
+
 
 endmacro(add_wast_target)
