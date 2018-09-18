@@ -4,6 +4,7 @@
 #include <hotc/chain/exceptions.hpp>
 #include <hotc/chain/producer_object.hpp>
 #include <hotc/chain/config.hpp>
+#include <hotc/chain/types.hpp>
 
 #include <hotc/native_contract/native_contract_chain_initializer.hpp>
 #include <hotc/native_contract/native_contract_chain_administrator.hpp>
@@ -27,6 +28,7 @@ using chain::account_object;
 using chain::key_value_object;
 using chain::by_name;
 using chain::by_scope_key;
+using chain::uint128_t;
 
 
 class chain_plugin_impl {
@@ -237,6 +239,48 @@ read_only::get_table_rows_i64_result read_only::get_table_rows_i64( const read_o
    return result;
 }
 
+read_only::get_table_rows_i128i128_primary_result read_only::get_table_rows_i128i128_primary( const read_only::get_table_rows_i128i128_primary_params& p )const {
+   read_only::get_table_rows_i128i128_primary_result result;
+   const auto& d = db.get_database();
+   const auto& code_account = d.get<account_object,by_name>( p.code );
+
+   types::AbiSerializer abis;
+   if( code_account.abi.size() > 4 ) { /// 4 == packsize of empty Abi
+      hotc::types::Abi abi;
+      fc::datastream<const char*> ds( code_account.abi.data(), code_account.abi.size() );
+      fc::raw::unpack( ds, abi );
+      abis.setAbi( abi );
+   }
+
+   const auto& idx = d.get_index<chain::key128x128_value_index,chain::by_scope_primary>();
+   auto lower = idx.lower_bound( boost::make_tuple( p.scope, p.code, p.table, p.lower_bound ) );
+   auto upper = idx.upper_bound( boost::make_tuple( p.scope, p.code, p.table, p.upper_bound ) );
+
+   vector<char> data;
+
+   auto start = fc::time_point::now();
+   auto end   = fc::time_point::now() + fc::microseconds( 1000*10 ); /// 10ms max time
+
+   int count = 0;
+   auto itr = lower;
+   for( itr = lower; itr != upper; ++itr ) {
+      data.resize( sizeof(uint128_t)*2 + itr->value.size() );
+      memcpy( data.data(), &itr->primary_key, sizeof(itr->primary_key) );
+      memcpy( data.data()+sizeof(uint128_t), &itr->secondary_key, sizeof(itr->secondary_key) );
+      memcpy( data.data()+sizeof(uint128_t)*2, itr->value.data(), itr->value.size() );
+
+      if( p.json ) 
+         result.rows.emplace_back( abis.binaryToVariant( abis.getTableType(p.table), data ) );
+      else
+         result.rows.emplace_back( fc::variant(data) );
+      if( ++count == p.limit || fc::time_point::now() > end )
+         break;
+   }
+   if( itr != upper ) 
+      result.more = true;
+   return result;
+}
+
 read_only::get_block_results read_only::get_block(const read_only::get_block_params& params) const {
    try {
       if (auto block = db.fetch_block_by_id(fc::json::from_string(params.block_num_or_id).as<chain::block_id_type>()))
@@ -290,8 +334,12 @@ read_only::get_account_results read_only::get_account( const get_account_params&
 }
 read_only::abi_json_to_bin_result read_only::abi_json_to_bin( const read_only::abi_json_to_bin_params& params )const {
    abi_json_to_bin_result result;
-   idump((params));
    result.binargs = db.message_to_binary( params.code, params.action, params.args );
+   return result;
+}
+read_only::abi_bin_to_json_result read_only::abi_bin_to_json( const read_only::abi_bin_to_json_params& params )const {
+   abi_bin_to_json_result result;
+   result.args = db.message_from_binary( params.code, params.action, params.binargs );
    return result;
 }
 
