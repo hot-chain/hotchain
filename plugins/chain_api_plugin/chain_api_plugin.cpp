@@ -1,11 +1,11 @@
-#include <omo/chain_api_plugin/chain_api_plugin.hpp>
-#include <omo/chain/exceptions.hpp>
+#include <hotc/chain_api_plugin/chain_api_plugin.hpp>
+#include <hotc/chain/exceptions.hpp>
 
 #include <fc/io/json.hpp>
 
-namespace omo {
+namespace hotc {
 
-using namespace omo;
+using namespace hotc;
 
 class chain_api_plugin_impl {
 public:
@@ -52,7 +52,9 @@ void chain_api_plugin::plugin_startup() {
       CHAIN_RO_CALL(get_block),
       CHAIN_RO_CALL(get_account),
       CHAIN_RO_CALL(get_table_rows_i64),
+      CHAIN_RO_CALL(get_table_rows_i128i128_primary),
       CHAIN_RO_CALL(abi_json_to_bin),
+      CHAIN_RO_CALL(abi_bin_to_json),
       CHAIN_RW_CALL(push_block),
       CHAIN_RW_CALL(push_transaction)
    });

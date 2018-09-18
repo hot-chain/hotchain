@@ -14,6 +14,7 @@ namespace hotc {
    using namespace appbase;
    using chain::Name;
    using fc::optional;
+   using chain::uint128_t;
 
 namespace chain_apis {
 struct empty{};
@@ -70,6 +71,20 @@ public:
    abi_json_to_bin_result abi_json_to_bin( const abi_json_to_bin_params& params )const;
 
 
+   struct abi_bin_to_json_params {
+      Name         code;
+      Name         action;
+      vector<char> binargs;
+   };
+   struct abi_bin_to_json_result {
+      fc::variant    args;
+      vector<Name>   required_scope;
+      vector<Name>   required_auth;
+   };
+      
+   abi_bin_to_json_result abi_bin_to_json( const abi_bin_to_json_params& params )const;
+
+
 
    struct get_block_params {
       string block_num_or_id;
@@ -106,6 +121,23 @@ public:
    };
 
    get_table_rows_i64_result get_table_rows_i64( const get_table_rows_i64_params& params )const;
+
+   struct get_table_rows_i128i128_primary_params {
+      bool        json = false;
+      Name        scope;
+      Name        code;
+      Name        table;
+      uint128_t   lower_bound = 0;
+      uint128_t   upper_bound = uint128_t(-1);
+      uint32_t    limit = 10;
+   };
+
+   struct get_table_rows_i128i128_primary_result {
+      vector<fc::variant> rows; ///< one row per item, either encoded as hex String or JSON object 
+      bool                more; ///< true if last element in data is not the end and sizeof data() < limit
+   };
+
+   get_table_rows_i128i128_primary_result get_table_rows_i128i128_primary( const get_table_rows_i128i128_primary_params& params )const;   
 };
 
 class read_write {
@@ -172,8 +204,14 @@ FC_REFLECT( hotc::chain_apis::read_only::get_table_rows_i64_params,
            (json)(scope)(code)(table)(lower_bound)(upper_bound)(limit) );
 FC_REFLECT( hotc::chain_apis::read_only::get_table_rows_i64_result,
            (rows)(more) );
+FC_REFLECT( hotc::chain_apis::read_only::get_table_rows_i128i128_primary_params,
+           (json)(scope)(code)(table)(lower_bound)(upper_bound)(limit) );
+FC_REFLECT( hotc::chain_apis::read_only::get_table_rows_i128i128_primary_result,
+           (rows)(more) );
 FC_REFLECT( hotc::chain_apis::read_only::get_account_results, (name)(hotc_balance)(staked_balance)(unstaking_balance)(last_unstaking_time)(producer)(abi) )
 FC_REFLECT( hotc::chain_apis::read_only::get_account_params, (name) )
 FC_REFLECT( hotc::chain_apis::read_only::producer_info, (name) )
 FC_REFLECT( hotc::chain_apis::read_only::abi_json_to_bin_params, (code)(action)(args) )
 FC_REFLECT( hotc::chain_apis::read_only::abi_json_to_bin_result, (binargs)(required_scope)(required_auth) )
+FC_REFLECT( hotc::chain_apis::read_only::abi_bin_to_json_params, (code)(action)(binargs) )
+FC_REFLECT( hotc::chain_apis::read_only::abi_bin_to_json_result, (args)(required_scope)(required_auth) )
