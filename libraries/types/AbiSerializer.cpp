@@ -1,9 +1,116 @@
 #include <hotc/types/AbiSerializer.hpp>
 #include <fc/io/raw.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 
 namespace hotc { namespace types {
 
+   using boost::algorithm::ends_with;
+   using std::vector;
+   using std::string;
+
+   template <typename T>
+   inline fc::variant variantFromStream(fc::datastream<const char*>& stream) {
+      T temp;
+      fc::raw::unpack( stream, temp );
+      return fc::variant(temp);
+   }
+
+   template <typename T>
+   auto packUnpack() {
+      return std::make_pair<AbiSerializer::unpack_function, AbiSerializer::pack_function>( 
+         []( fc::datastream<const char*>& stream, bool is_array) -> fc::variant  {
+            if( is_array )
+               return variantFromStream<vector<T>>(stream);
+            return variantFromStream<T>(stream);
+         },
+         []( const fc::variant& var, fc::datastream<char*>& ds, bool is_array ){
+            if( is_array )
+               fc::raw::pack( ds, var.as<vector<T>>() );
+            else
+               fc::raw::pack( ds,  var.as<T>());
+         }
+      );
+   }
+
    AbiSerializer::AbiSerializer( const Abi& abi ) {
+      configureBuiltInTypes();
+      setAbi(abi);
+   }
+
+   void AbiSerializer::configureBuiltInTypes() {
+      //PublicKey.hpp
+      built_in_types.emplace("PublicKey",     packUnpack<PublicKey>());
+
+      //Asset.hpp
+      built_in_types.emplace("Asset",         packUnpack<Asset>());
+      built_in_types.emplace("Price",         packUnpack<Price>());
+     
+      //native.hpp
+      built_in_types.emplace("String",        packUnpack<String>());
+      built_in_types.emplace("Time",          packUnpack<Time>());
+      built_in_types.emplace("Signature",     packUnpack<Signature>());
+      built_in_types.emplace("Checksum",      packUnpack<Checksum>());
+      built_in_types.emplace("FieldName",     packUnpack<FieldName>());
+      built_in_types.emplace("FixedString32", packUnpack<FixedString32>());
+      built_in_types.emplace("FixedString16", packUnpack<FixedString16>());
+      built_in_types.emplace("TypeName",      packUnpack<TypeName>());
+      built_in_types.emplace("Bytes",         packUnpack<Bytes>());
+      built_in_types.emplace("UInt8",         packUnpack<uint8_t>());
+      built_in_types.emplace("UInt16",        packUnpack<uint16_t>());
+      built_in_types.emplace("UInt32",        packUnpack<uint32_t>());
+      built_in_types.emplace("UInt64",        packUnpack<uint64_t>());
+      built_in_types.emplace("UInt128",       packUnpack<UInt128>());
+      built_in_types.emplace("UInt256",       packUnpack<UInt256>());
+      built_in_types.emplace("Int8",          packUnpack<int8_t>());
+      built_in_types.emplace("Int16",         packUnpack<int16_t>());
+      built_in_types.emplace("Int32",         packUnpack<int32_t>());
+      built_in_types.emplace("Int64",         packUnpack<int64_t>());
+      //built_in_types.emplace("Int128",      packUnpack<Int128>());
+      //built_in_types.emplace("Int256",      packUnpack<Int256>());
+      //built_in_types.emplace("uint128_t",   packUnpack<uint128_t>());
+      built_in_types.emplace("Name",          packUnpack<Name>());
+      built_in_types.emplace("Field",         packUnpack<Field>());
+      built_in_types.emplace("Struct",        packUnpack<Struct>());
+      built_in_types.emplace("Fields",        packUnpack<Fields>());
+      
+      //generated.hpp
+      built_in_types.emplace("AccountName",             packUnpack<AccountName>());
+      built_in_types.emplace("PermissionName",          packUnpack<PermissionName>());
+      built_in_types.emplace("FuncName",                packUnpack<FuncName>());
+      built_in_types.emplace("MessageName",             packUnpack<MessageName>());
+      //built_in_types.emplace("TypeName",              packUnpack<TypeName>());
+      built_in_types.emplace("AccountPermission",       packUnpack<AccountPermission>());
+      built_in_types.emplace("Message",                 packUnpack<Message>());
+      built_in_types.emplace("AccountPermissionWeight", packUnpack<AccountPermissionWeight>());
+      built_in_types.emplace("Transaction",             packUnpack<Transaction>());
+      built_in_types.emplace("SignedTransaction",       packUnpack<SignedTransaction>());
+      built_in_types.emplace("KeyPermissionWeight",     packUnpack<KeyPermissionWeight>());
+      built_in_types.emplace("Authority",               packUnpack<Authority>());
+      built_in_types.emplace("BlockchainConfiguration", packUnpack<BlockchainConfiguration>());
+      built_in_types.emplace("TypeDef",                 packUnpack<TypeDef>());
+      built_in_types.emplace("Action",                  packUnpack<Action>());
+      built_in_types.emplace("Table",                   packUnpack<Table>());
+      built_in_types.emplace("Abi",                     packUnpack<Abi>());
+      built_in_types.emplace("transfer",                packUnpack<transfer>());
+      built_in_types.emplace("lock",                    packUnpack<lock>());
+      built_in_types.emplace("unlock",                  packUnpack<unlock>());
+      built_in_types.emplace("claim",                   packUnpack<claim>());
+      built_in_types.emplace("newaccount",              packUnpack<newaccount>());
+      built_in_types.emplace("setcode",                 packUnpack<setcode>());
+      built_in_types.emplace("setproducer",             packUnpack<setproducer>());
+      built_in_types.emplace("okproducer",              packUnpack<okproducer>());
+      built_in_types.emplace("setproxy",                packUnpack<setproxy>());
+      built_in_types.emplace("UpdatePermission",        packUnpack<UpdatePermission>());
+      built_in_types.emplace("DeletePermission",        packUnpack<DeletePermission>());
+      
+   }
+
+   void AbiSerializer::setAbi( const Abi& abi ) {
+      typedefs.clear();
+      structs.clear();
+      actions.clear();
+      tables.clear();
+
       for( const auto& td : abi.types )
          typedefs[td.newTypeName] = td.type;
 
@@ -12,6 +119,7 @@ namespace hotc { namespace types {
       
       for( const auto& a : abi.actions )
          actions[a.action] = a.type;
+
       for( const auto& t : abi.tables )
          tables[t.table] = t.type;
 
@@ -24,23 +132,33 @@ namespace hotc { namespace types {
       FC_ASSERT( actions.size() == abi.actions.size() );
       FC_ASSERT( tables.size() == abi.tables.size() );
    }
+   
+   bool AbiSerializer::isArray( const TypeName& type )const {
+      return ends_with(string(type), "[]");
+   }
 
-   bool AbiSerializer::isType( const TypeName& type )const {
+   TypeName AbiSerializer::arrayType( const TypeName& type )const {
+      if( !isArray(type) ) return type;
+      return TypeName(string(type).substr(0, type.size()-2));
+   }
+
+   bool AbiSerializer::isType( const TypeName& rtype )const {
+      auto type = arrayType(rtype);
+      if( built_in_types.find(type) != built_in_types.end() ) return true;
       if( typedefs.find(type) != typedefs.end() ) return isType( typedefs.find(type)->second );
       if( structs.find(type) != structs.end() ) return true;
       return false;
    }
 
    const Struct& AbiSerializer::getStruct( const TypeName& type )const {
-      if( typedefs.find(type) != typedefs.end() ) return getStruct( typedefs.find(type)->second );
-      auto itr = structs.find(type);
+      auto itr = structs.find( resolveType(type) );
       FC_ASSERT( itr != structs.end(), "Unknown struct ${type}", ("type",type) );
       return itr->second;
    }
 
    void AbiSerializer::validate()const {
       for( const auto& t : typedefs ) { try {
-         FC_ASSERT( isType( t.second ) );
+         FC_ASSERT( isType( t.second ), "", ("type",t.second) );
       } FC_CAPTURE_AND_RETHROW( (t) ) }
       for( const auto& s : structs ) { try {
          if( s.second.base != TypeName() )
@@ -50,11 +168,11 @@ namespace hotc { namespace types {
          } FC_CAPTURE_AND_RETHROW( (field) ) }
       } FC_CAPTURE_AND_RETHROW( (s) ) }
       for( const auto& a : actions ) { try {
-        FC_ASSERT( isType( a.second ) );
+        FC_ASSERT( isType( a.second ), "", ("type",a.second) );
       } FC_CAPTURE_AND_RETHROW( (a)  ) }
 
       for( const auto& t : tables ) { try {
-        FC_ASSERT( isType( t.second ) );
+        FC_ASSERT( isType( t.second ), "", ("type",t.second) );
       } FC_CAPTURE_AND_RETHROW( (t)  ) }
    }
 
@@ -69,25 +187,20 @@ namespace hotc { namespace types {
       const auto& st = getStruct( type );
       if( st.base != TypeName() ) {
          binaryToVariant( resolveType(st.base), stream, obj );
-         return;
       }
       for( const auto& field : st.fields ) {
          obj( field.name, binaryToVariant( resolveType(field.type), stream ) );
       }
    }
+
    fc::variant AbiSerializer::binaryToVariant(const TypeName& type, fc::datastream<const char*>& stream )const
    {
       TypeName rtype = resolveType( type );
-      if( rtype == "Name" ) {
-        Name temp;
-        fc::raw::unpack( stream, temp );
-        return fc::variant(temp);
+      auto btype = built_in_types.find( arrayType(rtype) );
+      if( btype != built_in_types.end() ) {
+         return btype->second.first(stream, isArray(rtype));
       }
-      else if( rtype == "UInt64" ) {
-        uint64_t temp;
-        fc::raw::unpack( stream, temp );
-        return fc::variant(temp);
-      }
+      
       fc::mutable_variant_object mvo;
       binaryToVariant( rtype, stream, mvo );
       return fc::variant( std::move(mvo) );
@@ -102,18 +215,11 @@ namespace hotc { namespace types {
    {
       auto rtype = resolveType(type);
 
-      if( rtype == "Name" ) {
-         fc::raw::pack( ds, var.as<Name>() );
-         return;
-      }
-      else if( rtype == "UInt64" ) {
-         fc::raw::pack( ds, var.as<uint64_t>() );
-         return;
-      }
-      else if( rtype == "String" ) {
-         fc::raw::pack( ds, var.as<String>() );
-         return;
+      auto btype = built_in_types.find(arrayType(rtype));
+      if( btype != built_in_types.end() ) {
+         btype->second.second(var, ds, isArray(rtype));
       } else {
+         
          const auto& st = getStruct( rtype );
          const auto& vo = var.get_object();
 
@@ -132,11 +238,10 @@ namespace hotc { namespace types {
       }
    }
 
-
-
-   Bytes       AbiSerializer::variantToBinary(const TypeName& type, const fc::variant& var)const {
-      if( !isType(type) )
+   Bytes AbiSerializer::variantToBinary(const TypeName& type, const fc::variant& var)const {
+      if( !isType(type) ) {
          return var.as<Bytes>();
+      }
 
       Bytes temp( 1024*1024 );
       fc::datastream<char*> ds(temp.data(), temp.size() );
@@ -148,6 +253,11 @@ namespace hotc { namespace types {
    TypeName AbiSerializer::getActionType( Name action )const {
       auto itr = actions.find(action);
       if( itr != actions.end() ) return itr->second;
+      return TypeName();
+   }
+   TypeName AbiSerializer::getTableType( Name action )const {
+      auto itr = tables.find(action);
+      if( itr != tables.end() ) return itr->second;
       return TypeName();
    }
 
