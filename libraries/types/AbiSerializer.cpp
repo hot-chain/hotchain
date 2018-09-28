@@ -238,7 +238,7 @@ namespace hotc { namespace types {
       }
    }
 
-   Bytes AbiSerializer::variantToBinary(const TypeName& type, const fc::variant& var)const {
+   Bytes AbiSerializer::variantToBinary(const TypeName& type, const fc::variant& var) const {
       if( !isType(type) ) {
          return var.as<Bytes>();
       }
@@ -250,12 +250,12 @@ namespace hotc { namespace types {
       return temp;
    }
 
-   TypeName AbiSerializer::getActionType( Name action )const {
+   TypeName AbiSerializer::getActionType( Name action ) const {
       auto itr = actions.find(action);
       if( itr != actions.end() ) return itr->second;
       return TypeName();
    }
-   TypeName AbiSerializer::getTableType( Name action )const {
+   TypeName AbiSerializer::getTableType( Name action ) const {
       auto itr = tables.find(action);
       if( itr != tables.end() ) return itr->second;
       return TypeName();

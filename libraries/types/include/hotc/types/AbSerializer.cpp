@@ -28,28 +28,28 @@ struct AbiSerializer {
    map<TypeName, pair<unpack_function, pack_function>> built_in_types;
    void configureBuiltInTypes();
 
-   void validate()const;
+   void validate() const;
 
-   TypeName resolveType( const TypeName& t )const;
-   bool isArray( const TypeName& type )const;
-   bool isType( const TypeName& type )const;
-   bool isStruct( const TypeName& type )const;
+   TypeName resolveType( const TypeName& t ) const;
+   bool isArray( const TypeName& type ) const;
+   bool isType( const TypeName& type ) const;
+   bool isStruct( const TypeName& type ) const;
 
-   TypeName arrayType( const TypeName& type )const;
+   TypeName arrayType( const TypeName& type ) const;
 
-   const Struct& getStruct( const TypeName& type )const;
+   const Struct& getStruct( const TypeName& type ) const;
 
-   TypeName getActionType( Name action )const;
-   TypeName getTableType( Name action )const;
+   TypeName getActionType( Name action ) const;
+   TypeName getTableType( Name action ) const;
 
-   fc::variant binaryToVariant(const TypeName& type, const Bytes& binary)const;
-   Bytes       variantToBinary(const TypeName& type, const fc::variant& var)const;
+   fc::variant binaryToVariant(const TypeName& type, const Bytes& binary) const;
+   Bytes       variantToBinary(const TypeName& type, const fc::variant& var) const;
 
-   fc::variant binaryToVariant(const TypeName& type, fc::datastream<const char*>& binary )const;
-   void        variantToBinary(const TypeName& type, const fc::variant& var, fc::datastream<char*>& ds )const;
+   fc::variant binaryToVariant(const TypeName& type, fc::datastream<const char*>& binary ) const;
+   void        variantToBinary(const TypeName& type, const fc::variant& var, fc::datastream<char*>& ds ) const;
 
    private:
-   void binaryToVariant(const TypeName& type, fc::datastream<const char*>& stream, fc::mutable_variant_object& obj )const;
+   void binaryToVariant(const TypeName& type, fc::datastream<const char*>& stream, fc::mutable_variant_object& obj ) const;
 };
 
 } } // hotc::types
