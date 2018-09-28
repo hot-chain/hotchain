@@ -49,10 +49,9 @@ namespace hotc { namespace chain {
                member<key_value_object, AccountName, &key_value_object::scope>,
                member<key_value_object, AccountName, &key_value_object::code>,
                member<key_value_object, AccountName, &key_value_object::table>,
-               member<key_value_object, AccountName, &key_value_object::key>,
-               member<key_value_object, shared_string, &key_value_object::value>
+               member<key_value_object, AccountName, &key_value_object::key>
             >,
-            composite_key_compare< std::less<AccountName>,std::less<AccountName>,std::less<AccountName>,std::less<AccountName>,chainbase::strcmp_less >
+            composite_key_compare< std::less<AccountName>,std::less<AccountName>,std::less<AccountName>,std::less<AccountName> >
          >
       >
    >;
@@ -61,9 +60,9 @@ namespace hotc { namespace chain {
       OBJECT_CTOR(key128x128_value_object, (value))
 
       id_type               id;
-      uint64_t              scope; 
-      uint64_t              code;
-      uint64_t              table;
+      AccountName           scope; 
+      AccountName           code;
+      AccountName           table;
       uint128_t             primary_key;
       uint128_t             secondary_key;
       shared_string         value;
@@ -77,9 +76,9 @@ namespace hotc { namespace chain {
          ordered_unique<tag<by_id>, member<key128x128_value_object, key128x128_value_object::id_type, &key128x128_value_object::id>>,
          ordered_unique<tag<by_scope_primary>, 
             composite_key< key128x128_value_object,
-               member<key128x128_value_object, uint64_t, &key128x128_value_object::scope>,
-               member<key128x128_value_object, uint64_t, &key128x128_value_object::code>,
-               member<key128x128_value_object, uint64_t, &key128x128_value_object::table>,
+               member<key128x128_value_object, AccountName, &key128x128_value_object::scope>,
+               member<key128x128_value_object, AccountName, &key128x128_value_object::code>,
+               member<key128x128_value_object, AccountName, &key128x128_value_object::table>,
                member<key128x128_value_object, uint128_t, &key128x128_value_object::primary_key>,
                member<key128x128_value_object, uint128_t, &key128x128_value_object::secondary_key>
             >,
@@ -87,12 +86,13 @@ namespace hotc { namespace chain {
          >,
          ordered_unique<tag<by_scope_secondary>, 
             composite_key< key128x128_value_object,
-               member<key128x128_value_object, uint64_t, &key128x128_value_object::scope>,
-               member<key128x128_value_object, uint64_t, &key128x128_value_object::code>,
-               member<key128x128_value_object, uint64_t, &key128x128_value_object::table>,
+               member<key128x128_value_object, AccountName, &key128x128_value_object::scope>,
+               member<key128x128_value_object, AccountName, &key128x128_value_object::code>,
+               member<key128x128_value_object, AccountName, &key128x128_value_object::table>,
                member<key128x128_value_object, uint128_t, &key128x128_value_object::secondary_key>,
                member<key128x128_value_object, uint128_t, &key128x128_value_object::primary_key>
-            >
+            >,
+            composite_key_compare< std::less<AccountName>,std::less<AccountName>,std::less<AccountName>,std::less<uint128_t>,std::less<uint128_t> >
          >
       >
    >;
