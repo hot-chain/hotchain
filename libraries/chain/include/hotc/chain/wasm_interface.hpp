@@ -8,8 +8,6 @@
 namespace hotc { namespace chain {
 
 class  chain_controller;
-typedef int32_t (message_validate_context::*load_i128i128_fnc)(Name, Name, Name, uint128_t* , uint128_t*, char* , uint32_t);
-
 /**
  * @class wasm_interface
  *
@@ -33,14 +31,14 @@ class wasm_interface {
 
       void init( apply_context& c );
       void apply( apply_context& c );
-      void validate( message_validate_context& c );
-      void precondition( precondition_validate_context& c );
+      void validate( apply_context& c );
+      void precondition( apply_context& c );
 
       int64_t current_execution_time();
 
-      apply_context*                  current_apply_context        = nullptr;
-      message_validate_context*       current_validate_context     = nullptr;
-      precondition_validate_context*  current_precondition_context = nullptr;
+      apply_context*       current_apply_context        = nullptr;
+      apply_context*       current_validate_context     = nullptr;
+      apply_context*       current_precondition_context = nullptr;
 
       Runtime::MemoryInstance*   current_memory  = nullptr;
       Runtime::ModuleInstance*   current_module  = nullptr;
@@ -64,7 +62,11 @@ class wasm_interface {
 
       wasm_interface();
 
-      int32_t load_i128i128_object( uint64_t scope, uint64_t code, uint64_t table, int32_t valueptr, int32_t valuelen, load_i128i128_fnc function );
+      template <typename Function>
+      int32_t validate_i128i128(int32_t valueptr, int32_t valuelen, Function&& func);
+      
+      template <typename Function>
+      int32_t validate_i64(int32_t valueptr, int32_t valuelen, Function&& func);
 };
 
 
