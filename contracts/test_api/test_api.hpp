@@ -10,10 +10,10 @@
 
 typedef unsigned long long u64;
 #define WASM_TEST_HANDLER(CLASS, METHOD) \
-  if( u32(action>>32) == DJBH(#CLASS) && u32(action) == DJBH(#METHOD) ) { \
+  if( u32(action>>32) == DJBH(#CLASS) && u32(action) == DJBH(#METHOD) )  { \
      WASM_TEST_ERROR_CODE = CLASS::METHOD(); \
      return; \
-  }
+   }
 
 typedef unsigned int u32;
 static constexpr u32 DJBH(const char* cp)
