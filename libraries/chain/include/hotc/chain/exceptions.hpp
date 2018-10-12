@@ -43,6 +43,8 @@ namespace hotc { namespace chain {
    FC_DECLARE_DERIVED_EXCEPTION( unknown_block_exception,           hotc::chain::chain_exception, 3110000, "unknown block" )
 
    FC_DECLARE_DERIVED_EXCEPTION( tx_missing_auth,                   hotc::chain::transaction_exception, 3030001, "missing required authority" )
+   FC_DECLARE_DERIVED_EXCEPTION( tx_missing_sigs,                   hotc::chain::transaction_exception, 3030002, "signatures do not satisfy declared authorizations" )
+   FC_DECLARE_DERIVED_EXCEPTION( tx_irrelevant_auth,                hotc::chain::transaction_exception, 3030003, "irrelevant authority included" )
    FC_DECLARE_DERIVED_EXCEPTION( tx_irrelevant_sig,                 hotc::chain::transaction_exception, 3030004, "irrelevant signature included" )
    FC_DECLARE_DERIVED_EXCEPTION( tx_duplicate_sig,                  hotc::chain::transaction_exception, 3030005, "duplicate signature included" )
    FC_DECLARE_DERIVED_EXCEPTION( invalid_committee_approval,        hotc::chain::transaction_exception, 3030006, "committee account cannot directly approve transaction" )
@@ -50,6 +52,7 @@ namespace hotc { namespace chain {
    FC_DECLARE_DERIVED_EXCEPTION( tx_missing_scope,                  hotc::chain::transaction_exception, 3030008, "missing required scope" )
    FC_DECLARE_DERIVED_EXCEPTION( tx_missing_recipient,              hotc::chain::transaction_exception, 3030009, "missing required recipient" )
    FC_DECLARE_DERIVED_EXCEPTION( checktime_exceeded,                hotc::chain::transaction_exception, 3030010, "allotted processing time was exceeded" )
+   FC_DECLARE_DERIVED_EXCEPTION( unknown_transaction_exception,     hotc::chain::transaction_exception, 3030011, "unknown transaction" )
 
    FC_DECLARE_DERIVED_EXCEPTION( invalid_pts_address,               hotc::chain::utility_exception, 3060001, "invalid pts address" )
    FC_DECLARE_DERIVED_EXCEPTION( insufficient_feeds,                hotc::chain::chain_exception, 37006, "insufficient feeds" )

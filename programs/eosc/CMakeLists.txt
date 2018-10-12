@@ -1,4 +1,4 @@
-add_executable( hotcc main.cpp httpc.cpp )
+add_executable( hotcd main.cpp )
 if( UNIX AND NOT APPLE )
   set(rt_library rt )
 endif()
@@ -9,11 +9,11 @@ if( GPERFTOOLS_FOUND )
     list( APPEND PLATFORM_SPECIFIC_LIBS tcmalloc )
 endif()
 
-target_link_libraries( hotcc
-                       PRIVATE appbase chain_api_plugin producer_plugin chain_plugin net_plugin http_plugin hotc_chain fc ${CMAKE_DL_LIBS} ${PLATFORM_SPECIFIC_LIBS} )
+target_link_libraries( hotcd
+                       PRIVATE appbase account_history_api_plugin account_history_plugin chain_api_plugin producer_plugin chain_plugin net_plugin http_plugin hotc_chain fc ${CMAKE_DL_LIBS} ${PLATFORM_SPECIFIC_LIBS} )
 
 install( TARGETS
-   hotcc
+   hotcd
 
    RUNTIME DESTINATION bin
    LIBRARY DESTINATION lib
