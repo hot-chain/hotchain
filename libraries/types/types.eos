@@ -11,10 +11,9 @@ struct AccountPermission
    permission PermissionName
 
 struct Message
-   code            AccountName         # the contract defining the code to execute
-   recipients      AccountName[]       # the contexts within which the above code will execute
-   authorization   AccountPermission[] # the accounts and permission levels provided
+   code            AccountName         # the contract defining the primary code to execute for code/type
    type            FuncName            # the action to be taken 
+   authorization   AccountPermission[] # the accounts and permission levels provided
    data            Bytes               # opaque data processed by code
 
 struct AccountPermissionWeight
@@ -25,12 +24,11 @@ struct Transaction
    refBlockNum       UInt16
    refBlockPrefix    UInt32
    expiration        Time
-   scope             AccountName[]   # the accounts whose data may be accessed while processing this transaction
+   scope             AccountName[]   # the data may be accessed while processing this transaction
    messages          Message[]
 
 struct SignedTransaction inherits Transaction
    signatures     Signature[]
-   authorizations AccountPermission[]
 
 struct KeyPermissionWeight
    key    PublicKey
@@ -49,12 +47,30 @@ struct BlockchainConfiguration
    runnerUpPay       ShareType
    minHotcBalance     ShareType
    maxTrxLifetime    UInt32
+   authDepthLimit    UInt16
+
+struct TypeDef 
+   newTypeName TypeName
+   type        TypeName
+
+struct Action
+   action Name
+   type   TypeName
+
+struct Table
+   table Name
+   type  TypeName
+
+struct Abi
+   types   TypeDef[]
+   structs Struct[]
+   actions Action[]
+   tables  Table[]
 
 struct transfer
    from      AccountName  # may not be the message.sender if message.sender has delegated authority by from
    to        AccountName
-   amount    Asset
-   memo      String
+   amount    UInt64
 
 struct lock
    from      AccountName
@@ -82,6 +98,7 @@ struct setcode
    vmtype          UInt8        # the virtual machine type
    vmversion       UInt8        # the virtual machine version
    code            Bytes        # the apply
+   abi             Abi          # the interface description of the code
 
 
 struct setproducer
@@ -91,22 +108,32 @@ struct setproducer
 
 # implies message.sender account
 struct okproducer
-   producer  AccountName
-   approve   Int8  # 0 or 1
+   voter     AccountName # The account casting a vote
+   producer  AccountName # The producer being voted on
+   approve   Int8  # 1 to approve, or 0 to disapprove
 
-# implies message.sender account
-
-# implies message.sender account
 struct setproxy
-   proxy   AccountName
+   stakeholder    AccountName # The account with stake to be proxied
+   proxy          AccountName # The account to cast votes with stakeholder's stake weight
 
 
-struct UpdatePermission
+struct updateauth
    account     AccountName
    permission  PermissionName
    parent      PermissionName
    authority   Authority
 
-struct DeletePermission
+struct deleteauth
    account AccountName
    permission PermissionName
+
+struct linkauth # Specify a particular required permission for account to approve specified message type
+   account     AccountName # The account to require permissions for
+   code        AccountName # The contract to require permissions to invoke
+   type        FuncName
+   requirement PermissionName # The permission name to require
+
+struct unlinkauth
+   account     AccountName # The account to require permissions for
+   code        AccountName # The contract to require permissions to invoke
+   type        FuncName

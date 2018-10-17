@@ -31,6 +31,8 @@
 #include <hotc/chain/action_objects.hpp>
 #include <hotc/chain/transaction_object.hpp>
 #include <hotc/chain/producer_object.hpp>
+#include <hotc/chain/permission_link_object.hpp>
+#include <hotc/chain/authority_checker.hpp>
 
 #include <hotc/chain/wasm_interface.hpp>
 
@@ -228,23 +230,25 @@ bool chain_controller::_push_block(const signed_block& new_block)
  * queues full as well, it will be kept in the queue to be propagated later when a new block flushes out the pending
  * queues.
  */
-void chain_controller::push_transaction(const SignedTransaction& trx, uint32_t skip)
+ProcessedTransaction chain_controller::push_transaction(const SignedTransaction& trx, uint32_t skip)
 { try {
-   with_skip_flags(skip, [&]() {
-      _db.with_write_lock([&]() {
-         _push_transaction(trx);
+   return with_skip_flags(skip, [&]() {
+      return _db.with_write_lock([&]() {
+         return _push_transaction(trx);
       });
    });
 } FC_CAPTURE_AND_RETHROW((trx)) }
 
-void chain_controller::_push_transaction(const SignedTransaction& trx) {
+ProcessedTransaction chain_controller::_push_transaction(const SignedTransaction& trx) {
    // If this is the first transaction pushed after applying a block, start a new undo session.
    // This allows us to quickly rewind to the clean state of the head block, in case a new block arrives.
    if (!_pending_tx_session.valid())
       _pending_tx_session = _db.start_undo_session(true);
 
    auto temp_session = _db.start_undo_session(true);
-   _apply_transaction(trx);
+   validate_referenced_accounts(trx);
+   check_transaction_authorization(trx);
+   auto pt = _apply_transaction(trx);
    _pending_transactions.push_back(trx);
 
    // notify_changed_objects();
@@ -252,7 +256,9 @@ void chain_controller::_push_transaction(const SignedTransaction& trx) {
    temp_session.squash();
 
    // notify anyone listening to pending transactions
-   on_pending_transaction(trx);
+   on_pending_transaction(trx); /// TODO move this to apply...
+
+   return pt;
 }
 
 
@@ -326,6 +332,8 @@ signed_block chain_controller::_generate_block(
       try
       {
          auto temp_session = _db.start_undo_session(true);
+         validate_referenced_accounts(tx);
+         check_transaction_authorization(tx);
          _apply_transaction(tx);
          temp_session.squash();
 
@@ -432,6 +440,13 @@ void chain_controller::_apply_block(const signed_block& next_block)
              ("calc",next_block.calculate_merkle_root())("next_block",next_block)("id",next_block.id()));
 
    const producer_object& signing_producer = validate_block_header(skip, next_block);
+   
+   for (const auto& cycle : next_block.cycles)
+      for (const auto& thread : cycle)
+         for (const auto& trx : thread.user_input) {
+            validate_referenced_accounts(trx);
+            check_transaction_authorization(trx);
+         }
 
    /* We do not need to push the undo state for each transaction
     * because they either all apply and are valid or the
@@ -464,9 +479,47 @@ void chain_controller::_apply_block(const signed_block& next_block)
 
 } FC_CAPTURE_AND_RETHROW( (next_block.block_num()) )  }
 
-void chain_controller::apply_transaction(const SignedTransaction& trx, uint32_t skip)
+void chain_controller::check_transaction_authorization(const SignedTransaction& trx)const {
+   if ((_skip_flags & skip_transaction_signatures) && (_skip_flags & skip_authority_check)) {
+      ilog("Skipping auth and sigs checks");
+      return;
+   }
+
+
+   auto getPermission = [&db=_db](const types::AccountPermission& permission) {
+      auto key = boost::make_tuple(permission.account, permission.permission);
+      return db.get<permission_object, by_owner>(key);
+   };
+   auto getAuthority = [&getPermission](const types::AccountPermission& permission) {
+      return getPermission(permission).auth;
+   };
+   auto depthLimit = get_global_properties().configuration.authDepthLimit;
+#warning TODO: Use a real chain_id here (where is this stored? Do we still need it?)
+   auto checker = MakeAuthorityChecker(std::move(getAuthority), depthLimit, trx.get_signature_keys(chain_id_type{}));
+
+   for (const auto& message : trx.messages)
+      for (const auto& declaredAuthority : message.authorization) {
+         const auto& minimumPermission = lookup_minimum_permission(declaredAuthority.account,
+                                                                   message.code, message.type);
+         if ((_skip_flags & skip_authority_check) == false) {
+            const auto& index = _db.get_index<permission_index>().indices();
+            HOTC_ASSERT(getPermission(declaredAuthority).satisfies(minimumPermission, index), tx_irrelevant_auth,
+                       "Message declares irrelevant authority '${auth}'", ("auth", declaredAuthority));
+         }
+         if ((_skip_flags & skip_transaction_signatures) == false) {
+            HOTC_ASSERT(checker.satisfied(declaredAuthority), tx_missing_sigs,
+                       "Transaction declares authority '${auth}', but does not have signatures for it.",
+                       ("auth", declaredAuthority));
+         }
+      }
+
+   HOTC_ASSERT(checker.all_keys_used(), tx_irrelevant_sig,
+              "Transaction bears irrelevant signatures from these keys: ${keys}", ("keys", checker.unused_keys()));
+}
+
+ProcessedTransaction chain_controller::apply_transaction(const SignedTransaction& trx, uint32_t skip)
 {
-   with_skip_flags( skip, [&]() { _apply_transaction(trx); });
+   return with_skip_flags( skip, [&]() { return _apply_transaction(trx); });
 }
 
 void chain_controller::validate_transaction(const SignedTransaction& trx)const {
@@ -477,29 +530,6 @@ try {
    validate_expiration(trx);
    validate_uniqueness(trx);
    validate_tapos(trx);
-   validate_referenced_accounts(trx);
-
-   for (const auto& tm : trx.messages) { 
-      const Message* m = reinterpret_cast<const Message*>(&tm); //  m(tm);
-      m->for_each_handler( [&]( const AccountName& a ) {
-
-         #warning TODO: call validate handlers on all notified accounts, currently it only calls the recipient's validate
-
-         message_validate_context mvc(*this,_db,trx,*m,a);
-         auto contract_handlers_itr = message_validate_handlers.find(a); /// namespace is the notifier
-         if (contract_handlers_itr != message_validate_handlers.end()) {
-            auto message_handler_itr = contract_handlers_itr->second.find({m->code, m->type});
-            if (message_handler_itr != contract_handlers_itr->second.end()) {
-               message_handler_itr->second(mvc);
-               return;
-            }
-         }
-         const auto& acnt = _db.get<account_object,by_name>( a );
-         if( acnt.code.size() ) {
-            wasm_interface::get().validate( mvc );
-         }
-       });
-   }
 
 } FC_CAPTURE_AND_RETHROW( (trx) ) }
 
@@ -509,11 +539,32 @@ void chain_controller::validate_scope( const SignedTransaction& trx )const {
       HOTC_ASSERT( trx.scope[i-1] < trx.scope[i], transaction_exception, "Scopes must be sorted and unique" );
 }
 
+const permission_object& chain_controller::lookup_minimum_permission(types::AccountName authorizer_account,
+                                                                    types::AccountName code_account,
+                                                                    types::FuncName type) const {
+   try {
+      // First look up a specific link for this message type
+      auto key = boost::make_tuple(authorizer_account, code_account, type);
+      auto link = _db.find<permission_link_object, by_message_type>(key);
+      // If no specific link found, check for a contract-wide default
+      if (link == nullptr) {
+         get<2>(key) = "";
+         link = _db.find<permission_link_object, by_message_type>(key);
+      }
+
+      // If no specific or default link found, use active permission
+      auto permissionKey = boost::make_tuple<AccountName, PermissionName>(authorizer_account, "active");
+      if (link != nullptr)
+         get<1>(permissionKey) = link->required_permission;
+      return _db.get<permission_object, by_owner>(permissionKey);
+   } FC_CAPTURE_AND_RETHROW((authorizer_account)(code_account)(type))
+}
+
 void chain_controller::validate_uniqueness( const SignedTransaction& trx )const {
    if( !should_check_for_duplicate_transactions() ) return;
 
    auto transaction = _db.find<transaction_object, by_trx_id>(trx.id());
-   HOTC_ASSERT(transaction == nullptr, transaction_exception, "Transaction is not unique");
+   HOTC_ASSERT(transaction == nullptr, tx_duplicate, "Transaction is not unique");
 }
 
 void chain_controller::validate_tapos(const SignedTransaction& trx)const {
@@ -528,21 +579,12 @@ void chain_controller::validate_tapos(const SignedTransaction& trx)const {
 }
 
 void chain_controller::validate_referenced_accounts(const SignedTransaction& trx)const {
-   for(const auto& auth : trx.authorizations) {
-      require_account(auth.account);
-   }
-   for(const auto& msg : trx.messages) {
+   for (const auto& scope : trx.scope)
+      require_account(scope);
+   for (const auto& msg : trx.messages) {
       require_account(msg.code);
-      const AccountName* previous_recipient = nullptr;
-      for(const auto& current_recipient : msg.recipients) {
-         require_account(current_recipient);
-         if(previous_recipient) {
-            HOTC_ASSERT(*previous_recipient < current_recipient, message_validate_exception,
-                       "Message recipient accounts out of order. Possibly a bug in the wallet?",
-                       ("current", current_recipient.value)("previous", previous_recipient->value));
-         }
-         previous_recipient = &current_recipient;
-      }
+      for (const auto& auth : msg.authorization)
+         require_account(auth.account);
    }
 }
 
@@ -558,24 +600,6 @@ void chain_controller::validate_expiration(const SignedTransaction& trx) const
    HOTC_ASSERT(now <= trx.expiration, transaction_exception, "Transaction is expired",
               ("now",now)("trx.exp",trx.expiration));
 } FC_CAPTURE_AND_RETHROW((trx)) }
-
-
-void chain_controller::validate_message_precondition( precondition_validate_context& context )const 
-{ try {
-    const auto& m = context.msg;
-    auto contract_handlers_itr = precondition_validate_handlers.find(context.code);
-    if (contract_handlers_itr != precondition_validate_handlers.end()) {
-       auto message_handler_itr = contract_handlers_itr->second.find({m.code, m.type});
-       if (message_handler_itr != contract_handlers_itr->second.end()) {
-          message_handler_itr->second(context);
-          return;
-       }
-    }
-    const auto& recipient = _db.get<account_object,by_name>(context.code);
-    if (recipient.code.size()) {
-       wasm_interface::get().precondition(context);
-    }
-} FC_CAPTURE_AND_RETHROW() }
 
 
 /**
@@ -597,22 +621,35 @@ void chain_controller::validate_message_precondition( precondition_validate_cont
  *  The order of execution of precondition and apply can impact the validity of the
  *  entire message.
  */
-void chain_controller::process_message( const Transaction& trx, const Message& message) {
-   apply_context apply_ctx(*this, _db, trx, message, message.code);
-
-   /** TODO: pre condition validation and application can occur in parallel */
-   /** TODO: verify that message is fully authorized
-          (check that @ref SignedTransaction::authorizations are all present) */
-   validate_message_precondition(apply_ctx);
+void chain_controller::process_message(const ProcessedTransaction& trx, AccountName code,
+                                       const Message& message, MessageOutput& output) {
+   apply_context apply_ctx(*this, _db, trx, message, code);
    apply_message(apply_ctx);
 
-   for (const auto& recipient : message.recipients) {
-      FC_ASSERT( recipient != message.code, "message::code handler is always called and shouldn't be included in recipient list" );
+   // process_message recurses for each notified account, but we only want to run this check at the top level
+   if (code == message.code && (_skip_flags & skip_authority_check) == false)
+      HOTC_ASSERT(apply_ctx.all_authorizations_used(), tx_irrelevant_auth,
+                 "Message declared authorities it did not need: ${unused}",
+                 ("unused", apply_ctx.unused_authorizations())("message", message));
+
+   output.notify.reserve( apply_ctx.notified.size() );
+
+   for( uint32_t i = 0; i < apply_ctx.notified.size(); ++i ) {
       try {
-         apply_context recipient_ctx(*this,_db, trx, message, recipient);
-         validate_message_precondition(recipient_ctx);
-         apply_message(recipient_ctx);
-      } FC_CAPTURE_AND_RETHROW((recipient)(message))
+         auto notify_code = apply_ctx.notified[i];
+         output.notify.push_back( {notify_code} );
+         process_message( trx, notify_code, message, output.notify.back().output );
+      } FC_CAPTURE_AND_RETHROW((apply_ctx.notified[i]))
+   }
+
+   for( const auto& generated : apply_ctx.sync_transactions ) {
+      try {
+         output.sync_transactions.emplace_back( process_transaction( generated ) );
+      } FC_CAPTURE_AND_RETHROW((generated))
+   }
+
+   for( auto& asynctrx : apply_ctx.async_transactions ) {
+        output.async_transactions.emplace_back( std::move( asynctrx ) );
    }
 }
 
@@ -637,23 +674,9 @@ void chain_controller::apply_message(apply_context& context)
 
 } FC_CAPTURE_AND_RETHROW((context.msg)) }
 
-void chain_controller::_apply_transaction(const SignedTransaction& trx)
+ProcessedTransaction chain_controller::_apply_transaction(const SignedTransaction& trx)
 { try {
    validate_transaction(trx);
-
-   auto getAuthority = [&db=_db](const types::AccountPermission& permission) {
-      auto key = boost::make_tuple(permission.account, permission.permission);
-      return db.get<permission_object, by_owner>(key).auth;
-   };
-#warning TODO: Use a real chain_id here (where is this stored? Do we still need it?)
-   auto checker = MakeAuthorityChecker(std::move(getAuthority), trx.get_signature_keys(chain_id_type{}));
-
-   for (const auto& requiredAuthority : trx.authorizations)
-      HOTC_ASSERT(checker.satisfied(requiredAuthority), tx_missing_auth, "Transaction is not authorized.");
-
-   for (const auto& message : trx.messages) {
-      process_message(trx, message);
-   }
 
    //Insert transaction into unique transactions database.
    if (should_check_for_duplicate_transactions())
@@ -663,7 +686,27 @@ void chain_controller::_apply_transaction(const SignedTransaction& trx)
          transaction.trx = trx;
       });
    }
+
+   return process_transaction( trx );
+
 } FC_CAPTURE_AND_RETHROW((trx)) }
+
+
+/**
+ *  @pre the transaction is assumed valid and all signatures / duplicate checks have bee performed
+ */
+ProcessedTransaction chain_controller::process_transaction( const SignedTransaction& trx ) 
+{ try {
+   ProcessedTransaction ptrx( trx );
+   ptrx.output.resize( trx.messages.size() );
+
+   for( uint32_t i = 0; i < ptrx.messages.size(); ++i ) {
+      process_message(ptrx, ptrx.messages[i].code, ptrx.messages[i], ptrx.output[i] );
+   }
+
+   return ptrx;
+} FC_CAPTURE_AND_RETHROW( (trx) ) }
+
 
 void chain_controller::require_account(const types::AccountName& name) const {
    auto account = _db.find<account_object, by_name>(name);
@@ -779,6 +822,7 @@ uint32_t chain_controller::last_irreversible_block_num() const {
 void chain_controller::initialize_indexes() {
    _db.add_index<account_index>();
    _db.add_index<permission_index>();
+   _db.add_index<permission_link_index>();
    _db.add_index<action_permission_index>();
    _db.add_index<key_value_index>();
    _db.add_index<key128x128_value_index>();
@@ -814,8 +858,14 @@ void chain_controller::initialize_chain(chain_initializer_interface& starter)
             _db.create<block_summary_object>([&](block_summary_object&) {});
 
          auto messages = starter.prepare_database(*this, _db);
-         const Transaction trx; /// dummy tranaction required for scope validation
-         std::for_each(messages.begin(), messages.end(), [&](const Message& m) { process_message(trx,m); });
+         std::for_each(messages.begin(), messages.end(), [&](const Message& m) { 
+            MessageOutput output;
+            ProcessedTransaction trx; /// dummy tranaction required for scope validation
+            std::sort(trx.scope.begin(), trx.scope.end() );
+            with_skip_flags(skip_scope_check | skip_transaction_signatures | skip_authority_check, [&](){
+               process_message(trx,m.code,m,output); 
+            });
+         });
       });
    }
 } FC_CAPTURE_AND_RETHROW() }
@@ -1064,12 +1114,6 @@ uint32_t chain_controller::producer_participation_rate()const
    return uint64_t(config::Percent100) * __builtin_popcountll(dpo.recent_slots_filled) / 64;
 }
 
-void chain_controller::set_validate_handler( const AccountName& contract, const AccountName& scope, const ActionName& action, message_validate_handler v ) {
-   message_validate_handlers[contract][std::make_pair(scope,action)] = v;
-}
-void chain_controller::set_precondition_validate_handler(  const AccountName& contract, const AccountName& scope, const ActionName& action, precondition_validate_handler v ) {
-   precondition_validate_handlers[contract][std::make_pair(scope,action)] = v;
-}
 void chain_controller::set_apply_handler( const AccountName& contract, const AccountName& scope, const ActionName& action, apply_handler v ) {
    apply_handlers[contract][std::make_pair(scope,action)] = v;
 }
@@ -1077,12 +1121,12 @@ void chain_controller::set_apply_handler( const AccountName& contract, const Acc
 chain_initializer_interface::~chain_initializer_interface() {}
 
 
-SignedTransaction chain_controller::transaction_from_variant( const fc::variant& v )const {
+ProcessedTransaction chain_controller::transaction_from_variant( const fc::variant& v )const {
    const variant_object& vo = v.get_object();
 #define GET_FIELD( VO, FIELD, RESULT ) \
    if( VO.contains(#FIELD) ) fc::from_variant( VO[#FIELD], RESULT.FIELD )
 
-   SignedTransaction result;
+   ProcessedTransaction result;
    GET_FIELD( vo, refBlockNum, result );
    GET_FIELD( vo, refBlockPrefix, result );
    GET_FIELD( vo, expiration, result );
@@ -1096,7 +1140,6 @@ SignedTransaction chain_controller::transaction_from_variant( const fc::variant&
          const auto& vo = msgs[i].get_object();
          GET_FIELD( vo, code, result.messages[i] );
          GET_FIELD( vo, type, result.messages[i] );
-         GET_FIELD( vo, recipients, result.messages[i] );
          GET_FIELD( vo, authorization, result.messages[i] );
 
          if( vo.contains( "data" ) ) {
@@ -1104,6 +1147,8 @@ SignedTransaction chain_controller::transaction_from_variant( const fc::variant&
             if( data.is_string() ) {
                GET_FIELD( vo, data, result.messages[i] );
             } else if ( data.is_object() ) {
+               result.messages[i].data = message_to_binary( result.messages[i].code, result.messages[i].type, data ); 
+               /*
                const auto& code_account = _db.get<account_object,by_name>( result.messages[i].code );
                if( code_account.abi.size() > 4 ) { /// 4 == packsize of empty Abi
                   fc::datastream<const char*> ds( code_account.abi.data(), code_account.abi.size() );
@@ -1112,15 +1157,42 @@ SignedTransaction chain_controller::transaction_from_variant( const fc::variant&
                   types::AbiSerializer abis( abi );
                   result.messages[i].data = abis.variantToBinary( abis.getActionType( result.messages[i].type ), data );
                }
+               */
             }
          }
       }
+   }
+   if( vo.contains( "output" ) ) {
+      const vector<variant>& outputs = vo["output"].get_array();
    }
    return result;
 #undef GET_FIELD
 }
 
-fc::variant  chain_controller::transaction_to_variant( const SignedTransaction& trx )const {
+vector<char> chain_controller::message_to_binary( Name code, Name type, const fc::variant& obj )const {
+   const auto& code_account = _db.get<account_object,by_name>( code );
+   if( code_account.abi.size() > 4 ) { /// 4 == packsize of empty Abi
+      fc::datastream<const char*> ds( code_account.abi.data(), code_account.abi.size() );
+      hotc::types::Abi abi;
+      fc::raw::unpack( ds, abi );
+      types::AbiSerializer abis( abi );
+      return abis.variantToBinary( abis.getActionType( type ), obj );
+   }
+   return vector<char>();
+}
+fc::variant chain_controller::message_from_binary( Name code, Name type, const vector<char>& data )const {
+   const auto& code_account = _db.get<account_object,by_name>( code );
+   if( code_account.abi.size() > 4 ) { /// 4 == packsize of empty Abi
+      fc::datastream<const char*> ds( code_account.abi.data(), code_account.abi.size() );
+      hotc::types::Abi abi;
+      fc::raw::unpack( ds, abi );
+      types::AbiSerializer abis( abi );
+      return abis.binaryToVariant( abis.getActionType( type ), data );
+   }
+   return fc::variant();
+}
+
+fc::variant  chain_controller::transaction_to_variant( const ProcessedTransaction& trx )const {
 #define SET_FIELD( MVO, OBJ, FIELD ) MVO(#FIELD, OBJ.FIELD)
 
     fc::mutable_variant_object trx_mvo;
@@ -1138,16 +1210,16 @@ fc::variant  chain_controller::transaction_to_variant( const SignedTransaction& 
        auto& msg     = trx.messages[i];
        SET_FIELD( msg_mvo, msg, code );
        SET_FIELD( msg_mvo, msg, type );
-       SET_FIELD( msg_mvo, msg, recipients );
        SET_FIELD( msg_mvo, msg, authorization );
 
        const auto& code_account = _db.get<account_object,by_name>( msg.code );
        if( code_account.abi.size() > 4 ) { /// 4 == packsize of empty Abi
-          fc::datastream<const char*> ds( code_account.abi.data(), code_account.abi.size() );
-          hotc::types::Abi abi;
-          fc::raw::unpack( ds, abi );
-          types::AbiSerializer abis( abi );
-          msg_mvo( "data", abis.binaryToVariant( abis.getActionType( msg.type ), msg.data ) );
+          try {
+             msg_mvo( "data", message_from_binary( msg.code, msg.type, msg.data ) ); 
+             msg_mvo( "hex_data", msg.data );
+          } catch ( ... ) {
+            SET_FIELD( msg_mvo, msg, data );
+          }
        }
        else {
          SET_FIELD( msg_mvo, msg, data );
@@ -1155,6 +1227,15 @@ fc::variant  chain_controller::transaction_to_variant( const SignedTransaction& 
        msgsv[i] = std::move( msgs[i] );
     }
     trx_mvo( "messages", std::move(msgsv) );
+
+    /* TODO: recursively process generated transactions 
+    vector<fc::mutable_variant_object> outs( trx.messages.size() );
+    for( uint32_t i = 0; i < trx.output.size(); ++i ) {
+       auto& out_mvo = outs[i];
+       auto& out = trx.outputs[i];
+    }
+    */
+    trx_mvo( "output", fc::variant( trx.output ) );
 
     return fc::variant( std::move( trx_mvo ) );
 #undef SET_FIELD
