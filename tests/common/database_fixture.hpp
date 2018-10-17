@@ -23,16 +23,19 @@
  */
 #pragma once
 
-#include <hotc/chain/database.hpp>
+#include <hotc/chain/chain_controller.hpp>
 #include <hotc/chain/producer_object.hpp>
 #include <hotc/chain/exceptions.hpp>
+
+#include <hotc/native_contract/native_contract_chain_initializer.hpp>
+#include <hotc/native_contract/native_contract_chain_administrator.hpp>
 
 #include <hotc/utilities/tempdir.hpp>
 
 #include <fc/io/json.hpp>
 #include <fc/smart_ref_impl.hpp>
-#include <fc/signals.hpp>
 
+#include <boost/range/algorithm/sort.hpp>
 #include <boost/preprocessor/seq/for_each.hpp>
 #include <boost/preprocessor/facilities/overload.hpp>
 
@@ -42,7 +45,10 @@ using namespace hotc::chain;
 
 extern uint32_t HOTC_TESTING_GENESIS_TIMESTAMP;
 
-#define TEST_DB_SIZE (1024*1024*10)
+#define HAVE_DATABASE_FIXTURE
+#include "testing_macros.hpp"
+
+#define TEST_DB_SIZE (1024*1024*1000)
 
 #define HOTC_REQUIRE_THROW( expr, exc_type )          \
 {                                                         \
@@ -54,11 +60,11 @@ extern uint32_t HOTC_TESTING_GENESIS_TIMESTAMP;
       ("exc_type", #exc_type)                             \
       );                                                  \
    if( fc::enable_record_assert_trip )                    \
-      std::cout << "HOTC_REQUIRE_THROW begin "        \
+      std::cout << "HOTC_REQUIRE_THROW begin "             \
          << req_throw_info << std::endl;                  \
    BOOST_REQUIRE_THROW( expr, exc_type );                 \
    if( fc::enable_record_assert_trip )                    \
-      std::cout << "HOTC_REQUIRE_THROW end "          \
+      std::cout << "HOTC_REQUIRE_THROW end "               \
          << req_throw_info << std::endl;                  \
 }
 
@@ -72,11 +78,11 @@ extern uint32_t HOTC_TESTING_GENESIS_TIMESTAMP;
       ("exc_type", #exc_type)                             \
       );                                                  \
    if( fc::enable_record_assert_trip )                    \
-      std::cout << "HOTC_CHECK_THROW begin "          \
+      std::cout << "HOTC_CHECK_THROW begin "               \
          << req_throw_info << std::endl;                  \
    BOOST_CHECK_THROW( expr, exc_type );                   \
    if( fc::enable_record_assert_trip )                    \
-      std::cout << "HOTC_CHECK_THROW end "            \
+      std::cout << "HOTC_CHECK_THROW end "                 \
          << req_throw_info << std::endl;                  \
 }
 
@@ -85,7 +91,7 @@ FC_DECLARE_EXCEPTION(testing_exception, 6000000, "test framework exception")
 FC_DECLARE_DERIVED_EXCEPTION(missing_key_exception, hotc::chain::testing_exception, 6010000, "key could not be found")
 
 /**
- * @brief The testing_fixture class provides various services relevant to testing the database.
+ * @brief The testing_fixture class provides various services relevant to testing the blockchain.
  */
 class testing_fixture {
 public:
@@ -108,169 +114,130 @@ public:
     */
    fc::path get_temp_dir(std::string id = std::string());
 
-   const genesis_state_type& genesis_state() const;
-   genesis_state_type& genesis_state();
+   const native_contract::genesis_state_type& genesis_state() const;
+   native_contract::genesis_state_type& genesis_state();
 
+   void store_private_key(const private_key_type& key);
    private_key_type get_private_key(const public_key_type& public_key) const;
+   flat_set<public_key_type> available_keys() const;
 
 protected:
    std::vector<fc::temp_directory> anonymous_temp_dirs;
    std::map<std::string, fc::temp_directory> named_temp_dirs;
    std::map<public_key_type, private_key_type> key_ring;
-   genesis_state_type default_genesis_state;
+   native_contract::genesis_state_type default_genesis_state;
 };
 
 /**
- * @brief The testing_database class wraps database and eliminates some of the boilerplate for common operations on the
- * database during testing.
+ * @brief The testing_blockchain class wraps chain_controller and eliminates some of the boilerplate for common 
+ * operations on the blockchain during testing.
  *
- * testing_databases have an optional ID, which is passed to the constructor. If two testing_databases are created with
- * the same ID, they will have the same data directory. If no ID, or an empty ID, is provided, the database will have a
- * unique data directory which no subsequent testing_database will be assigned.
+ * testing_blockchains have an optional ID, which is passed to the constructor. If two testing_blockchains are created 
+ * with the same ID, they will have the same data directory. If no ID, or an empty ID, is provided, the database will 
+ * have a unique data directory which no subsequent testing_blockchain will be assigned.
  *
- * testing_database helps with producing blocks, or missing blocks, via the @ref produce_blocks and @ref miss_blocks
+ * testing_blockchain helps with producing blocks, or missing blocks, via the @ref produce_blocks and @ref miss_blocks
  * methods. To produce N blocks, simply call produce_blocks(N); to miss N blocks, call miss_blocks(N). Note that missing
- * blocks has no effect on the database until the next block, following the missed blocks, is produced.
+ * blocks has no effect on the blockchain until the next block, following the missed blocks, is produced.
  */
-class testing_database : public database {
+class testing_blockchain : public chain_controller {
 public:
-   testing_database(testing_fixture& fixture, std::string id = std::string(),
-                    fc::optional<genesis_state_type> override_genesis_state = {});
+    testing_blockchain(chainbase::database& db, fork_database& fork_db, block_log& blocklog,
+                     chain_initializer_interface& initializer, testing_fixture& fixture);
 
    /**
-    * @brief Open the database using the boilerplate testing database settings
-    */
-   void open();
-   /**
-    * @brief Reindex the database using the boilerplate testing database settings
-    */
-   void replay();
-   /**
-    * @brief Wipe the database using the boilerplate testing database settings
-    * @param include_blocks If true, the blocks will be removed as well; otherwise, only the database will be wiped and
-    * can then be rebuilt from the local blocks
-    */
-   void wipe(bool include_blocks = true);
-
-   /**
-    * @brief Produce new blocks, adding them to the database, optionally following a gap of missed blocks
+    * @brief Produce new blocks, adding them to the blockchain, optionally following a gap of missed blocks
     * @param count Number of blocks to produce
     * @param blocks_to_miss Number of block intervals to miss a production before producing the next block
     *
-    * Creates and adds  @ref count new blocks to the database, after going @ref blocks_to_miss intervals without
+    * Creates and adds  @ref count new blocks to the blockchain, after going @ref blocks_to_miss intervals without
     * producing a block.
     */
    void produce_blocks(uint32_t count = 1, uint32_t blocks_to_miss = 0);
 
    /**
-    * @brief Sync this database with other
-    * @param other Database to sync with
+    * @brief Sync this blockchain with other
+    * @param other Blockchain to sync with
     *
-    * To sync the databases, all blocks from one database which are unknown to the other are pushed to the other, then
-    * the same thing in reverse. Whichever database has more blocks will have its blocks sent to the other first.
+    * To sync the blockchains, all blocks from one blockchain which are unknown to the other are pushed to the other, 
+    * then the same thing in reverse. Whichever blockchain has more blocks will have its blocks sent to the other 
+    * first.
     *
     * Blocks not on the main fork are ignored.
     */
-   void sync_with(testing_database& other);
+   void sync_with(testing_blockchain& other);
+
+   /// @brief Get the liquid balance belonging to the named account
+   Asset get_liquid_balance(const types::AccountName& account);
+   /// @brief Get the staked balance belonging to the named account
+   Asset get_staked_balance(const types::AccountName& account);
+   /// @brief Get the unstaking balance belonging to the named account
+   Asset get_unstaking_balance(const types::AccountName& account);
+
+   /// @brief Get the set of producers approved by the named account
+   std::set<AccountName> get_approved_producers(const AccountName& account);
+   /// @brief Get the specified block producer's signing key
+   PublicKey get_block_signing_key(const AccountName& producerName);
+
+   /// @brief Attempt to sign the provided transaction using the keys available to the testing_fixture
+   void sign_transaction(SignedTransaction& trx);
+
+   /// @brief Override push_transaction to apply testing policies
+   ProcessedTransaction push_transaction(SignedTransaction trx, uint32_t skip_flags = 0);
+
+   /// @brief Set whether testing_blockchain::push_transaction checks signatures by default
+   /// @param skip_sigs If true, push_transaction will skip signature checks; otherwise, no changes will be made
+   void set_skip_transaction_signature_checking(bool skip_sigs) {
+      skip_trx_sigs = skip_sigs;
+   }
+   /// @brief Set whether testing_blockchain::push_transaction attempts to sign transactions or not
+   void set_auto_sign_transactions(bool auto_sign) {
+      auto_sign_trxs = auto_sign;
+   }
 
 protected:
-   fc::path data_dir;
-   genesis_state_type genesis_state;
-
+   chainbase::database& db;
    testing_fixture& fixture;
+   bool skip_trx_sigs = true;
+   bool auto_sign_trxs = false;
 };
 
-/// Some helpful macros to reduce boilerplate when making testing_databases @{
-#define MKDB1(name) testing_database name(*this); name.open();
-#define MKDB2(name, id) testing_database name(*this, #id); name.open();
-/**
- * @brief Create/Open a testing_database, optionally with an ID
- *
- * Creates and opens a testing_database with the first argument as its name, and, if present, the second argument as
- * its ID. The ID should be provided without quotes.
- *
- * Example:
- * @code{.cpp}
- * // Create testing_databases db1 and db2, with db2 having ID "id2"
- * MKDB(db1)
- * MKDB(db2, id2)
- * @endcode
- */
-#define MKDB(...) BOOST_PP_OVERLOAD(MKDB, __VA_ARGS__)(__VA_ARGS__)
-#define MKDBS_MACRO(x, y, name) MKDB(name)
-/**
- * @brief Similar to @ref MKDB, but works with several databases at once
- *
- * Creates and opens several testing_databases
- *
- * Example:
- * @code{.cpp}
- * // Create testing_databases db1 and db2, with db2 having ID "id2"
- * MKDBS((db1)(db2, id2))
- * @endcode
- */
-#define MKDBS(...) BOOST_PP_SEQ_FOR_EACH(MKDBS_MACRO, _, __VA_ARGS__)
-/// @}
+using boost::signals2::scoped_connection;
 
 /**
- * @brief The testing_network class provides a simplistic virtual P2P network connecting testing_databases together.
+ * @brief The testing_network class provides a simplistic virtual P2P network connecting testing_blockchains together.
  *
- * A testing_database may be connected to zero or more testing_networks at any given time. When a new testing_database
- * joins the network, it will be synced with all other databases already in the network (blocks known only to the new
- * database will be pushed to the prior network members and vice versa, ignoring blocks not on the main fork). After
- * this, whenever any database in the network gets a new block, that block will be pushed to all other databases in the
- * network as well.
+ * A testing_blockchain may be connected to zero or more testing_networks at any given time. When a new 
+ * testing_blockchain joins the network, it will be synced with all other blockchains already in the network (blocks 
+ * known only to the new chain will be pushed to the prior network members and vice versa, ignoring blocks not on the 
+ * main fork). After this, whenever any blockchain in the network gets a new block, that block will be pushed to all 
+ * other blockchains in the network as well.
  */
 class testing_network {
 public:
    /**
     * @brief Add a new database to the network
-    * @param new_database The database to add
+    * @param new_blockchain The blockchain to add
     */
-   void connect_database(testing_database& new_database);
+   void connect_blockchain(testing_blockchain& new_database);
    /**
     * @brief Remove a database from the network
-    * @param leaving_database The database to remove
+    * @param leaving_blockchain The database to remove
     */
-   void disconnect_database(testing_database& leaving_database);
+   void disconnect_database(testing_blockchain& leaving_blockchain);
    /**
-    * @brief Disconnect all databases from the network
+    * @brief Disconnect all blockchains from the network
     */
    void disconnect_all();
 
    /**
-    * @brief Send a block to all databases in this network
+    * @brief Send a block to all blockchains in this network
     * @param block The block to send
     */
-   void propagate_block(const signed_block& block, const testing_database& skip_db);
+   void propagate_block(const signed_block& block, const testing_blockchain& skip_db);
 
 protected:
-   std::map<testing_database*, fc::scoped_connection> databases;
+   std::map<testing_blockchain*, scoped_connection> blockchains;
 };
-
-/// Some helpful macros to reduce boilerplate when making a testing_network and connecting some testing_databases @{
-#define MKNET1(name) testing_network name;
-#define MKNET2_MACRO(x, name, db) name.connect_database(db);
-#define MKNET2(name, ...) MKNET1(name) BOOST_PP_SEQ_FOR_EACH(MKNET2_MACRO, name, __VA_ARGS__)
-/**
- * @brief MKNET is a shorthand way to create a testing_network and connect some testing_databases to it.
- *
- * Example usage:
- * @code{.cpp}
- * // Create and open testing_databases named alice, bob, and charlie
- * MKDBS((alice)(bob)(charlie))
- * // Create a testing_network named net and connect alice and bob to it
- * MKNET(net, (alice)(bob))
- *
- * // Connect charlie to net, then disconnect alice
- * net.connect_database(charlie);
- * net.disconnect_database(alice);
- *
- * // Create a testing_network named net2 with no databases connected
- * MKNET(net2)
- * @endcode
- */
-#define MKNET(...) BOOST_PP_OVERLOAD(MKNET, __VA_ARGS__)(__VA_ARGS__)
-/// @}
 
 } }
