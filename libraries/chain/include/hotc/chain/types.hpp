@@ -171,7 +171,7 @@ namespace hotc { namespace chain {
       transaction_object_type,
       producer_object_type,
       chain_property_object_type,
-      transaction_history_object_type,
+      transaction_history_object_type, ///< Defined by account_history_plugin
       balance_object_type, ///< Defined by native_contract library
       staked_balance_object_type, ///< Defined by native_contract library
       producer_votes_object_type, ///< Defined by native_contract library
@@ -200,7 +200,7 @@ namespace fc {
   void to_variant(const hotc::chain::shared_vector<hotc::types::Field>& c, fc::variant& v);
   void from_variant(const fc::variant& v, hotc::chain::shared_vector<hotc::types::Field>& fields);
   void to_variant(const hotc::chain::ProducerRound& r, fc::variant& v);
-  void from_variant(const fc::variant& v, hotc::chain::ProducerRound& r);
+  void from_variant(const fc::variant& v, hotc::chain::ProducerRound& r) ;
 }
 
 FC_REFLECT_ENUM(hotc::chain::object_type,
