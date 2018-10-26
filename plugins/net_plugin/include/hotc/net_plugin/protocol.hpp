@@ -10,6 +10,7 @@ namespace hotc {
       int16_t         network_version = 0;
       chain_id_type   chain_id; ///< used to identify chain
       fc::sha256      node_id; ///< used to identify peers and prevent self-connect
+      string          p2p_address;
       uint32_t        last_irreversible_block_num = 0;
       block_id_type   last_irreversible_block_id;
       uint32_t        head_num = 0;
@@ -21,6 +22,12 @@ namespace hotc {
    struct notice_message {
       vector<transaction_id_type> known_trx;
       vector<block_id_type>       known_blocks;
+   };
+
+
+   struct request_message {
+      vector<transaction_id_type> req_trx;
+      vector<block_id_type>       req_blocks;
    };
 
    struct block_summary_message {
@@ -40,6 +47,7 @@ namespace hotc {
    using net_message = static_variant<handshake_message,
                                       peer_message,
                                       notice_message,
+                                      request_message,
                                       sync_request_message,
                                       block_summary_message,
                                       SignedTransaction,
@@ -50,12 +58,14 @@ namespace hotc {
 
 FC_REFLECT( hotc::handshake_message,
             (network_version)(chain_id)(node_id)
+            (p2p_address)
             (last_irreversible_block_num)(last_irreversible_block_id)
             (head_num)(head_id)
             (os)(agent) )
 
 FC_REFLECT( hotc::block_summary_message, (block)(trx_ids) )
 FC_REFLECT( hotc::notice_message, (known_trx)(known_blocks) )
+FC_REFLECT( hotc::request_message, (req_trx)(req_blocks) )
 FC_REFLECT( hotc::sync_request_message, (start_block)(end_block) )
 FC_REFLECT( hotc::peer_message, (peers) )
 
@@ -119,5 +129,16 @@ State:
 
      Once you have caught up to all peers, notify all peers of your head block so they know that you
      know the LIB and will start sending you real time tranasctions
+
+parallel fetches, request in groups
+
+
+only relay transactions to peers if we don't already know about it.
+
+send a notification rather than a transaaction if the txn is > 3mtu size.
+
+
+
+
 
 */
