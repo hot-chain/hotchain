@@ -13,7 +13,7 @@ extern "C" {
 
       //test_types
       WASM_TEST_HANDLER(test_types, types_size);
-      WASM_TEST_HANDLER(test_types, char_to_symbol) ;
+      WASM_TEST_HANDLER(test_types, char_to_symbol);
       WASM_TEST_HANDLER(test_types, string_to_name);
       WASM_TEST_HANDLER(test_types, name_class);
 
@@ -37,17 +37,20 @@ extern "C" {
       WASM_TEST_HANDLER(test_math, test_multeq_i128);
       WASM_TEST_HANDLER(test_math, test_diveq_i128);
       WASM_TEST_HANDLER(test_math, test_diveq_i128_by_0);
+      WASM_TEST_HANDLER(test_math, test_double_api);
+      WASM_TEST_HANDLER(test_math, test_double_api_div_0);
+
 
       //test db
-      WASM_TEST_HANDLER( test_db, key_i64_general );
-      WASM_TEST_HANDLER( test_db, key_i64_remove_all );
+      WASM_TEST_HANDLER(test_db, key_i64_general);
+      WASM_TEST_HANDLER(test_db, key_i64_remove_all);
       WASM_TEST_HANDLER(test_db, key_i64_small_load);
       WASM_TEST_HANDLER(test_db, key_i64_small_store);
       WASM_TEST_HANDLER(test_db, key_i64_store_scope);
       WASM_TEST_HANDLER(test_db, key_i64_remove_scope);
       WASM_TEST_HANDLER(test_db, key_i64_not_found);
       WASM_TEST_HANDLER(test_db, key_i64_front_back);
-
+      WASM_TEST_HANDLER(test_db, key_i64i64i64_general);
       WASM_TEST_HANDLER(test_db, key_i128i128_general);
 
       //test crypto

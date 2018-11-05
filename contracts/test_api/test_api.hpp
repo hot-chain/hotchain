@@ -10,10 +10,10 @@
 
 typedef unsigned long long u64;
 #define WASM_TEST_HANDLER(CLASS, METHOD) \
-  if( u32(action>>32) == DJBH(#CLASS) && u32(action) == DJBH(#METHOD) )  { \
+  if( u32(action>>32) == DJBH(#CLASS) && u32(action) == DJBH(#METHOD) ) { \
      WASM_TEST_ERROR_CODE = CLASS::METHOD(); \
      return; \
-   }
+  }
 
 typedef unsigned int u32;
 static constexpr u32 DJBH(const char* cp)
@@ -74,6 +74,8 @@ struct test_math {
   static unsigned int test_multeq_i128();
   static unsigned int test_diveq_i128();
   static unsigned int test_diveq_i128_by_0();
+  static unsigned int test_double_api();
+  static unsigned int test_double_api_div_0();
 };
 
 struct test_db {
@@ -87,6 +89,7 @@ struct test_db {
    static unsigned int key_i64_front_back();
 
    static unsigned int key_i128i128_general();
+   static unsigned int key_i64i64i64_general();
 };
 
 struct test_crypto {
