@@ -17,7 +17,7 @@ const LogWatcher = ( block_first = 'latest', block_last = 'latest', contract_eve
         if(!error) 
           callback( result )
         else 
-          log("error"< 'Error: LogWatcher Result'), settle( onError(), null )
+          log("error"< 'Error: LogWatcher Result'), settle ( onError(), null )
       })
 
     let _timeout = setTimeout(() => {
