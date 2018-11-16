@@ -118,6 +118,7 @@ namespace hotc { namespace chain {
    using hotc::types::Transaction;
    using hotc::types::PermissionName;
    using hotc::types::TypeName;
+   using hotc::types::FuncName;
    using hotc::types::Time;
    using hotc::types::Field;
    using hotc::types::String;
@@ -161,6 +162,7 @@ namespace hotc { namespace chain {
       null_object_type,
       account_object_type,
       permission_object_type,
+      permission_link_object_type,
       action_code_object_type,
       key_value_object_type,
       key128x128_value_object_type,
@@ -169,14 +171,18 @@ namespace hotc { namespace chain {
       dynamic_global_property_object_type,
       block_summary_object_type,
       transaction_object_type,
+      generated_transaction_object_type,
       producer_object_type,
       chain_property_object_type,
+      account_transaction_history_object_type, ///< Defined by account_history_plugin
       transaction_history_object_type, ///< Defined by account_history_plugin
+      public_key_history_object_type, ///< Defined by account_history_plugin
       balance_object_type, ///< Defined by native_contract library
       staked_balance_object_type, ///< Defined by native_contract library
       producer_votes_object_type, ///< Defined by native_contract library
       producer_schedule_object_type, ///< Defined by native_contract library
       proxy_vote_object_type, ///< Defined by native_contract library
+      key64x64x64_value_object_type,
       OBJECT_TYPE_COUNT ///< Sentry value which contains the number of different object types
    };
 
@@ -200,13 +206,14 @@ namespace fc {
   void to_variant(const hotc::chain::shared_vector<hotc::types::Field>& c, fc::variant& v);
   void from_variant(const fc::variant& v, hotc::chain::shared_vector<hotc::types::Field>& fields);
   void to_variant(const hotc::chain::ProducerRound& r, fc::variant& v);
-  void from_variant(const fc::variant& v, hotc::chain::ProducerRound& r) ;
+  void from_variant(const fc::variant& v, hotc::chain::ProducerRound& r);
 }
 
 FC_REFLECT_ENUM(hotc::chain::object_type,
                 (null_object_type)
                 (account_object_type)
                 (permission_object_type)
+                (permission_link_object_type)
                 (action_code_object_type)
                 (key_value_object_type)
                 (key128x128_value_object_type)
@@ -215,14 +222,18 @@ FC_REFLECT_ENUM(hotc::chain::object_type,
                 (dynamic_global_property_object_type)
                 (block_summary_object_type)
                 (transaction_object_type)
+                (generated_transaction_object_type)
                 (producer_object_type)
                 (chain_property_object_type)
+                (account_transaction_history_object_type)
                 (transaction_history_object_type)
+                (public_key_history_object_type)
                 (balance_object_type)
                 (staked_balance_object_type)
                 (producer_votes_object_type)
                 (producer_schedule_object_type)
                 (proxy_vote_object_type)
+                (key64x64x64_value_object_type)
                 (OBJECT_TYPE_COUNT)
                )
 FC_REFLECT( hotc::chain::void_t, )
