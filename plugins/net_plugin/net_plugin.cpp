@@ -34,16 +34,6 @@ namespace hotc {
 
   using socket_ptr = std::shared_ptr<tcp::socket>;
 
-  struct node_transaction_state {
-    transaction_id_type id;
-    fc::time_point      received;
-    fc::time_point_sec  expires;
-    vector<char>        packed_transaction;
-    uint32_t            block_num = -1; /// block transaction was included in
-    bool                validated = false; /// whether or not our node has validated it
-  };
-
-
   /**
    *  Index by id
    *  Index by is_known, block_num, validated_time, this is the order we will broadcast
@@ -110,11 +100,25 @@ namespace hotc {
 
   class connection : public std::enable_shared_from_this<connection> {
   public:
-    connection( socket_ptr s )
-      : socket(s)
+    connection( socket_ptr s, bool try_recon )
+      : block_state(),
+        trx_state(),
+        in_sync_state(),
+        out_sync_state(),
+        socket(s),
+        shared_peers(),
+        pending_message_size(),
+        pending_message_buffer(),
+        remote_node_id(),
+        last_handshake(),
+        out_queue(),
+        try_reconnect (try_recon)
     {
       wlog( "created connection" );
       pending_message_buffer.resize( 1024*1024*4 );
+      auto *rnd = remote_node_id.data();
+      rnd[0] = 0;
+
     }
 
     ~connection() {
@@ -126,14 +130,16 @@ namespace hotc {
     sync_request_index             in_sync_state;
     sync_request_index             out_sync_state;
     socket_ptr                     socket;
-    std::set<fc::ip::endpoint>     shared_peers;
+    std::set<fc::sha256>           shared_peers;
 
     uint32_t                       pending_message_size;
     vector<char>                   pending_message_buffer;
 
+    fc::sha256                     remote_node_id;
     handshake_message              last_handshake;
     std::deque<net_message>        out_queue;
     uint32_t                       mtu;
+    bool                           try_reconnect;
 
     void send_handshake ( ) {
       handshake_message hello;
@@ -198,7 +204,7 @@ namespace hotc {
         wlog( "write loop exception" );
       }
       if (out_sync_state.size() == 0) {
-        send_handshake ();
+        send_handshake ( );
       }
   }
 
@@ -206,45 +212,73 @@ namespace hotc {
   }; // class connection
 
 
+  struct node_transaction_state {
+    transaction_id_type id;
+    fc::time_point      received;
+    fc::time_point_sec  expires;
+    // vector<char>        packed_transaction; //just for the moment
+    SignedTransaction   transaction;
+    uint32_t            block_num = -1; /// block transaction was included in
+    bool                validated = false; /// whether or not our node has validated it
+  };
+
+  struct by_expiry;
+
+  typedef multi_index_container<
+    node_transaction_state,
+    indexed_by<
+      ordered_unique<
+        tag<by_id>, member < node_transaction_state,
+                             transaction_id_type,
+                             &node_transaction_state::id > >,
+      ordered_non_unique<
+        tag<by_expiry>, member< node_transaction_state,
+                                fc::time_point_sec,
+                                &node_transaction_state::expires > >
+      >
+    >
+  node_transaction_index;
+
   static boost::thread_specific_ptr<transaction_id_type> last_recd_txn;
   static net_plugin_impl *my_impl;
 
   class last_recd_txn_guard {
   public:
-    last_recd_txn_guard (transaction_id_type id) {
-      transaction_id_type *ptid = new transaction_id_type(id);
-      last_recd_txn.reset (ptid);
+    last_recd_txn_guard(transaction_id_type tid ) {
+      last_recd_txn.reset (new transaction_id_type(tid));
     }
+
     ~last_recd_txn_guard () {
+      delete last_recd_txn.get();
       last_recd_txn.reset (0);
     }
   };
 
   class net_plugin_impl {
   public:
-    unique_ptr<tcp::acceptor> acceptor;
+    unique_ptr<tcp::acceptor>     acceptor;
+    tcp::endpoint                 listen_endpoint;
+    string                        p2p_address;
 
-    tcp::endpoint listen_endpoint;
-    string        p2p_address;
-
-    vector<string> seed_nodes;
-    std::set<tcp::endpoint>       resolved_seed_nodes;
-    std::set<fc::ip::endpoint>    learned_nodes;
+    vector<string>                supplied_peers;
+    std::set<fc::sha256>          resolved_nodes;
+    std::set<fc::sha256>          learned_nodes;
 
     std::set<socket_ptr>          pending_sockets;
     std::set< connection_ptr >    connections;
     bool                          done = false;
 
-    int16_t         network_version = 0;
-    chain_id_type   chain_id; ///< used to identify chain
-    fc::sha256      node_id; ///< used to identify peers and prevent self-connect
 
-    std::string user_agent_name;
-    chain_plugin* chain_plug;
-    int32_t          just_send_it_max;
+    int16_t                       network_version = 0;
+    chain_id_type                 chain_id; ///< used to identify chain
+    fc::sha256                    node_id; ///< used to identify peers and prevent self-connect
 
-    vector<node_transaction_state> local_txns;
-    vector<transaction_id_type> pending_notify;
+    string                        user_agent_name;
+    chain_plugin*                 chain_plug;
+    int32_t                       just_send_it_max;
+
+    node_transaction_index        local_txns;
+    vector<transaction_id_type>   pending_notify;
 
     void connect( const string& peer_addr ) {
       auto host = peer_addr.substr( 0, peer_addr.find(':') );
@@ -263,20 +297,6 @@ namespace hotc {
                                  }
                                });
     }
-#if 0
-    void connect( tcp::endpoint ep) {
-      auto sock = std::make_shared<tcp::socket>( std::ref( app().get_io_service() ) );
-      pending_sockets.insert( sock );
-      sock->async_connect (ep, [ep, sock, this]( const boost::system::error_code& err ) {
-          pending_sockets.erase( sock );
-          if( !err ) {
-            start_session (std::make_shared<connection>(sock));
-          } else {
-            elog ("cannot connect to ${addr}:${port}: ${error}",("addr",ep.address().to_string())("port",ep.port())("err",err.message()));
-          }
-        });
-    }
-#endif
 
     void connect( std::shared_ptr<tcp::resolver> resolver, tcp::resolver::iterator endpoint_itr ) {
       auto sock = std::make_shared<tcp::socket>( std::ref( app().get_io_service() ) );
@@ -289,8 +309,7 @@ namespace hotc {
                            ( const boost::system::error_code& err ) {
                              pending_sockets.erase( sock );
                              if( !err ) {
-                               resolved_seed_nodes.insert (sock->remote_endpoint());
-                               start_session( std::make_shared<connection>(sock));
+                               start_session( std::make_shared<connection>(sock, true));
                              } else {
                                if( endpoint_itr != tcp::resolver::iterator() ) {
                                  connect( resolver, endpoint_itr );
@@ -323,7 +342,7 @@ namespace hotc {
 #endif
 
 
-    void start_session( connection_ptr con ) {
+    void start_session(connection_ptr con ) {
       connections.insert (con);
       uint32_t mtu = 1300; // need a way to query this
       if (mtu < just_send_it_max) {
@@ -331,7 +350,7 @@ namespace hotc {
       }
       start_read_message( con );
 
-      con->send_handshake();
+      con->send_handshake( );
       send_peer_message(*con);
 
       // for now, we can just use the application main loop.
@@ -344,7 +363,7 @@ namespace hotc {
       auto socket = std::make_shared<tcp::socket>( std::ref( app().get_io_service() ) );
       acceptor->async_accept( *socket, [socket,this]( boost::system::error_code ec ) {
           if( !ec ) {
-            start_session( std::make_shared<connection>( socket ) );
+            start_session( std::make_shared<connection>( socket, false ) );
             start_listen_loop();
           } else {
             elog( "Error accepting connection: ${m}", ("m", ec.message() ) );
@@ -392,9 +411,8 @@ namespace hotc {
       peer_message pm;
       pm.peers.resize(connections.size());
       for (auto &c : connections) {
-        fc::ip::endpoint remote = asio_to_fc(c->socket->remote_endpoint());
-        if (conn.shared_peers.find(remote) == conn.shared_peers.end()) {
-          pm.peers.push_back(remote);
+        if (conn.shared_peers.find(c->remote_node_id) == conn.shared_peers.end()) {
+          pm.peers.push_back(c->remote_node_id);
         }
       }
       if (!pm.peers.empty()) {
@@ -405,7 +423,6 @@ namespace hotc {
     //    template<typename T>
     void send_all (const SignedTransaction &msg) {
       for (auto &c : connections) {
-        ilog ("send_all bsm: peer in_sync ${insiz} out_sync ${outsiz}", ("insiz",c->in_sync_state.size())("outsiz",c->out_sync_state.size()));
         if (c->out_sync_state.size() == 0) {
           const auto& bs = c->trx_state.find(msg.id());
           if (bs == c->trx_state.end()) {
@@ -419,7 +436,6 @@ namespace hotc {
 
     void send_all (const block_summary_message &msg) {
       for (auto &c : connections) {
-        ilog ("send_all bsm: peer in_sync ${insiz} out_sync ${outsiz}", ("insiz",c->in_sync_state.size())("outsiz",c->out_sync_state.size()));
         const auto& bs = c->block_state.find(msg.block.id());
         if (bs == c->block_state.end()) {
           c->block_state.insert ((block_state){msg.block.id(),true,true,fc::time_point()});
@@ -431,7 +447,6 @@ namespace hotc {
 
     void send_all (const notice_message &msg) {
       for (auto &c : connections) {
-        ilog ("send_all nm: peer in_sync ${insiz} out_sync ${outsiz}", ("insiz",c->in_sync_state.size())("outsiz",c->out_sync_state.size()));
         if (c->out_sync_state.size() == 0) {
           for (const auto& b : msg.known_blocks) {
             const auto& bs = c->block_state.find(b);
@@ -494,21 +509,22 @@ namespace hotc {
       if ( msg.head_num  >  head) {
         shared_fetch (head, msg.head_num);
       }
+      c->remote_node_id = msg.node_id;
       c->last_handshake = msg;
     }
 
     void handle_message (connection_ptr c, const peer_message &msg) {
       dlog ("got a peer message with ${pc}", ("pc", msg.peers.size()));
-      for (auto fcep : msg.peers) {
-        c->shared_peers.insert (fcep);
-        tcp::endpoint ep = fc_to_asio (fcep);
-        if (ep == listen_endpoint) {
+      c->shared_peers.clear();
+      for (auto pnode : msg.peers) {
+        if (pnode == node_id) {
           continue;
         }
+        c->shared_peers.insert (pnode);
 
-        if (resolved_seed_nodes.find(ep) == resolved_seed_nodes.end() &&
-            learned_nodes.find (fcep) == learned_nodes.end()) {
-          learned_nodes.insert (fcep);
+        if (resolved_nodes.find (pnode) == resolved_nodes.end() &&
+            learned_nodes.find (pnode) == learned_nodes.end()) {
+          learned_nodes.insert (pnode);
         }
       }
     }
@@ -542,21 +558,50 @@ namespace hotc {
     }
 
     void handle_message (connection_ptr c, const request_message &msg) {
-      dlog ("got a request_message");
-#warning ("TODO: implement handling a request_message")
+        // collect a list of transactions that were found.
+        // collect a second list of transaction ids that were not found but are otherwise known by some peers
+        // finally, what remains are future(?) transactions
+      vector< SignedTransaction > send_now;
+      map <connection_ptr, vector < transaction_id_type > > forward_to;
+      auto conn_ndx = connections.begin();
+      for (auto t: msg.req_trx) {
+        auto txn = local_txns.get<by_id>().find(t);
+        if (txn != local_txns.end()) {
+          send_now.push_back(txn->transaction);
+        }
+        else {
+          auto loop_start = conn_ndx++;
+          while (conn_ndx != loop_start) {
+            if (conn_ndx == connections.end()) {
+              conn_ndx = connections.begin();
+              continue;
+            }
+            if (conn_ndx->get() == c.get()) {
+              ++conn_ndx;
+              continue;
+            }
+            auto txn = conn_ndx->get()->trx_state.get<by_id>().find(t);
+            if (txn != conn_ndx->get()->trx_state.end()) {
+                // add to forward_to list
+            }
+          }
+        }
+      }
 
+      if (!send_now.empty()) {
+      }
     }
 
     void handle_message (connection_ptr c, const sync_request_message &msg) {
-      dlog ("got a sync request message for blocks ${s} to ${e}",
-           ("s",msg.start_block)("e", msg.end_block));
+      // dlog ("got a sync request message for blocks ${s} to ${e}",
+      //      ("s",msg.start_block)("e", msg.end_block));
       sync_state req = {msg.start_block,msg.end_block,msg.start_block-1,time_point::now()};
       c->out_sync_state.insert (req);
       c->write_block_backlog ();
     }
 
     void handle_message (connection_ptr c, const block_summary_message &msg) {
-      dlog ("got a block summary message blkid = ${b}", ("b",msg.block.id()));
+      // dlog ("got a block summary message blkid = ${b}", ("b",msg.block.id()));
 #warning ("TODO: reconstruct actual block from cached transactions")
       const auto& itr = c->block_state.get<by_id>();
       auto bs = itr.find(msg.block.id());
@@ -590,12 +635,14 @@ namespace hotc {
     }
 
     void handle_message (connection_ptr c, const SignedTransaction &msg) {
-      dlog ("got a SignedTransacton");
       chain_controller &cc = chain_plug->chain();
       if (!cc.is_known_transaction(msg.id())) {
         last_recd_txn_guard tls_guard(msg.id());
-
         chain_plug->accept_transaction (msg);
+        uint16_t bn = static_cast<uint16_t>(msg.refBlockNum);
+        node_transaction_state nts = {msg.id(),time_point::now(),msg.expiration,
+                                      msg,bn, true};
+        local_txns.insert(nts);
         forward (c, msg);
       }
     }
@@ -653,11 +700,9 @@ namespace hotc {
                                boost::asio::buffer(c->pending_message_buffer.data(),
                                                    c->pending_message_size ),
                                [this,c]( boost::system::error_code ec, std::size_t bytes_transferred ) {
-                                 // ilog( "read buffer handler..." );
                                  if( !ec ) {
                                    try {
                                      auto msg = fc::raw::unpack<net_message>( c->pending_message_buffer );
-                                     // ilog( "received message of size: ${s}", ("s",bytes_transferred) );
                                      start_read_message( c );
 
                                      msgHandler m(*this, c);
@@ -670,6 +715,9 @@ namespace hotc {
                                    elog( "Error reading message from connection: ${m}", ("m", ec.message() ) );
                                  }
                                  close( c );
+                                 if ( c->try_reconnect ) {
+
+                                 }
                                });
     }
 
@@ -681,8 +729,7 @@ namespace hotc {
       c.reset ();
     }
 
-    void send_all_txn (const SignedTransaction&txn) {
-      dlog ("got signaled about a pending transaction");
+    void send_all_txn (const SignedTransaction& txn) {
       if (last_recd_txn.get() && *last_recd_txn.get() == txn.id()) {
         dlog ("skipping our received transacton");
         return;
@@ -702,12 +749,17 @@ namespace hotc {
       pending_notify.push_back(txn.id());
     }
 
+    /**
+     * This one is necessary to hook into the boost notifier api
+     **/
     static void pending_txn (const SignedTransaction& txn) {
       my_impl->send_all_txn (txn);
     }
 
 
   }; // class net_plugin_impl
+
+
 
   net_plugin_impl* handshake_initializer::info;
 
@@ -803,7 +855,7 @@ namespace hotc {
     }
 
     if( options.count( "remote-endpoint" ) ) {
-      my->seed_nodes = options.at( "remote-endpoint" ).as< vector<string> >();
+      my->supplied_peers = options.at( "remote-endpoint" ).as< vector<string> >();
     }
     if (options.count("agent-name")) {
       my->user_agent_name = options.at ("agent-name").as< string > ();
@@ -815,7 +867,6 @@ namespace hotc {
   }
 
   void net_plugin::plugin_startup() {
-    // boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::tcp::v4(), port);
     if( my->acceptor ) {
 
       my->acceptor->open(my->listen_endpoint.protocol());
@@ -827,7 +878,7 @@ namespace hotc {
       my->start_listen_loop();
     }
 
-    for( auto seed_node : my->seed_nodes ) {
+    for( auto seed_node : my->supplied_peers ) {
       my->connect( seed_node );
     }
     boost::asio::signal_set signals (app().get_io_service(), SIGINT, SIGTERM);
@@ -851,15 +902,10 @@ namespace hotc {
           my->close (con);
         }
 
-        idump((my->connections.size()));
         my->acceptor.reset(nullptr);
       }
       ilog( "exit shutdown" );
     } FC_CAPTURE_AND_RETHROW() }
-
-    void net_plugin::broadcast_transaction (const SignedTransaction &txn) {
-      my->pending_txn (txn);
-    }
 
     void net_plugin::broadcast_block (const chain::signed_block &sb) {
       vector<transaction_id_type> trxs;
