@@ -33,6 +33,7 @@ uint32_t port = 8888;
 const string chain_func_base = "/v1/chain";
 const string get_info_func = chain_func_base + "/get_info";
 const string push_txn_func = chain_func_base + "/push_transaction";
+const string push_txns_func = chain_func_base + "/push_transactions";
 const string json_to_bin_func = chain_func_base + "/abi_json_to_bin";
 const string get_block_func = chain_func_base + "/get_block";
 const string get_account_func = chain_func_base + "/get_account";
