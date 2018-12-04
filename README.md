@@ -131,35 +131,3 @@ docker exec docker_hotc_1 hotcc setcode currency contracts/currency/currency.was
 ```
 
 Done
-
-
-
-
-### How to Build LLVM and clang for WASM
-
-By default LLVM and clang do not include the WASM build target, so you will have to build it yourself. Note that following these instructions will create a version of LLVM that can only build WASM targets.
-
-```
-mkdir  ~/wasm-compiler
-cd ~/wasm-compiler
-git clone --depth 1 --single-branch --branch release_40 https://github.com/llvm-mirror/llvm.git
-cd llvm/tools
-git clone --depth 1 --single-branch --branch release_40 https://github.com/llvm-mirror/clang.git
-cd ..
-mkdir build
-cd build
-cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX=.. -DLLVM_TARGETS_TO_BUILD= -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=WebAssembly -DCMAKE_BUILD_TYPE=Release ../
-make -j4 install
-```
-
-### Using the WASM compiler to perform a full build of the project
-
-The WASM_LLVM_CONFIG environment variable is used to find our recently built WASM compiler.
-This is needed to compile the example contracts insde hotc/contracts folder and their respective tests.
-
-```
-git clone https://github.com/hotcio/hotc --recursive
-mkdir -p hotc/build && cd hotc/build
-WASM_LLVM_CONFIG=~/wasm-compiler/llvm/bin/llvm-config cmake ..
-make -j4
-```
