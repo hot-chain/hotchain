@@ -1,22 +1,22 @@
-#!/bin/sh
-cd /opt/hotc/bin
+ #!/bin/sh
+ cd /opt/hotc/bin
 
-if [ -f '/opt/hotc/bin/data-dir/config.ini' ]; then
+ if [ -f '/opt/hotc/bin/data-dir/config.ini' ]; then
     echo
-  else
+   else
     cp /config.ini /opt/hotc/bin/data-dir
-fi
+ fi
 
-if [ -f '/opt/hotc/bin/data-dir/genesis.json' ]; then
+ if [ -f '/opt/hotc/bin/data-dir/genesis.json' ]; then
     echo
   else
     cp /genesis.json /opt/hotc/bin/data-dir
-fi
+ fi
 
-if [ -d '/opt/hotc/bin/data-dir/contracts' ]; then
+ if [ -d '/opt/hotc/bin/data-dir/contracts' ]; then
     echo
-  else
+   else
     cp -r /contracts /opt/hotc/bin/data-dir
-fi
+ fi
 
-exec /opt/hotc/bin/hotcd $@
+ exec /opt/hotc/bin/hotcd $@
