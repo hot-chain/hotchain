@@ -1,5 +1,5 @@
 FROM ubuntu:16.04
-MAINTAINER xiaobo (peterwillcn@gmail.com)
+LABEL authors="xiaobo (peterwillcn@gmail.com), toonsevrin (toonsevrin@gmail.com)"
 
 RUN echo 'APT::Install-Recommends 0;' >> /etc/apt/apt.conf.d/01norecommends \
  && echo 'APT::Install-Suggests 0;' >> /etc/apt/apt.conf.d/01norecommends \
@@ -42,15 +42,17 @@ RUN cd /tmp && mkdir wasm-compiler && cd wasm-compiler \
   && cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX=/opt/wasm -DLLVM_TARGETS_TO_BUILD= -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=WebAssembly -DCMAKE_BUILD_TYPE=Release ../ \
   && make -j$(nproc) install && rm -rf /tmp/wasm-compiler
 
-RUN cd /tmp && git clone https://github.com/HOTCIO/hotc.git --recursive \
-  && mkdir -p /opt/hotc/bin/data-dir && cd hotc && mkdir build && cd build \
-  && WASM_LLVM_CONFIG=/opt/wasm/bin/llvm-config cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DCMAKE_INSTALL_PREFIX=/opt/hotc ../ \
+RUN mkdir -p /opt/hotc/bin/data-dir && mkdir -p /tmp/hotc/build/
+
+COPY . /tmp/hotc/
+
+RUN cd /tmp/hotc/build && WASM_LLVM_CONFIG=/opt/wasm/bin/llvm-config cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DCMAKE_INSTALL_PREFIX=/opt/hotc ../ \
   && make -j$(nproc) && make install && mv ../contracts / \
   && ln -s /opt/hotc/bin/hotc* /usr/local/bin \
   && rm -rf /tmp/hotc*
 
-COPY config.ini genesis.json /
-COPY entrypoint.sh /sbin
+COPY Docker/config.ini genesis.json /
+COPY Docker/entrypoint.sh /sbin
 RUN chmod +x /sbin/entrypoint.sh
 VOLUME /opt/hotc/bin/data-dir
 EXPOSE 9876 8888
