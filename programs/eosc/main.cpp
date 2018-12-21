@@ -10,6 +10,7 @@
 #include <hotc/chain_plugin/chain_plugin.hpp>
 #include <hotc/utilities/key_conversion.hpp>
 #include <boost/range/algorithm/sort.hpp>
+#include <boost/range/adaptor/transformed.hpp>
 #include <boost/algorithm/string/split.hpp>
 
 #include <Inline/BasicTypes.h>
@@ -21,6 +22,8 @@
 
 #include <fc/io/fstream.hpp>
 
+#include "CLI11.hpp"
+
 using namespace std;
 using namespace hotc;
 using namespace hotc::chain;
@@ -30,6 +33,12 @@ string program = "hotcc";
 string host = "localhost";
 uint32_t port = 8888;
 
+// restricting use of wallet to localhost
+const string wallet_host = "localhost";
+
+// TODO: make wallet_port a cli option when above host/port is made a cli option
+constexpr uint32_t wallet_port = 8899;
+
 const string chain_func_base = "/v1/chain";
 const string get_info_func = chain_func_base + "/get_info";
 const string push_txn_func = chain_func_base + "/push_transaction";
@@ -37,11 +46,26 @@ const string push_txns_func = chain_func_base + "/push_transactions";
 const string json_to_bin_func = chain_func_base + "/abi_json_to_bin";
 const string get_block_func = chain_func_base + "/get_block";
 const string get_account_func = chain_func_base + "/get_account";
+const string get_required_keys = chain_func_base + "/get_required_keys";
 
 const string account_history_func_base = "/v1/account_history";
 const string get_transaction_func = account_history_func_base + "/get_transaction";
 const string get_transactions_func = account_history_func_base + "/get_transactions";
 const string get_key_accounts_func = account_history_func_base + "/get_key_accounts";
+const string get_controlled_accounts_func = account_history_func_base + "/get_controlled_accounts";
+
+const string wallet_func_base = "/v1/wallet";
+const string wallet_create = wallet_func_base + "/create";
+const string wallet_open = wallet_func_base + "/open";
+const string wallet_list = wallet_func_base + "/list_wallets";
+const string wallet_list_keys = wallet_func_base + "/list_keys";
+const string wallet_public_keys = wallet_func_base + "/get_public_keys";
+const string wallet_lock = wallet_func_base + "/lock";
+const string wallet_lock_all = wallet_func_base + "/lock_all";
+const string wallet_unlock = wallet_func_base + "/unlock";
+const string wallet_import_key = wallet_func_base + "/import_key";
+const string wallet_sign_trx = wallet_func_base + "/sign_transaction";
+
 
 inline std::vector<Name> sort_names( std::vector<Name>&& names ) {
    std::sort( names.begin(), names.end() );
@@ -101,412 +125,464 @@ hotc::chain_apis::read_only::get_info_results get_info() {
   return call(host, port, get_info_func ).as<hotc::chain_apis::read_only::get_info_results>();
 }
 
-fc::variant push_transaction( SignedTransaction& trx ) {
+void sign_transaction(SignedTransaction& trx) {
+   // TODO better error checking
+   const auto& public_keys = call(wallet_host, wallet_port, wallet_public_keys);
+   auto get_arg = fc::mutable_variant_object
+         ("transaction", trx)
+         ("available_keys", public_keys);
+   const auto& required_keys = call(host, port, get_required_keys, get_arg);
+   // TODO determine chain id
+   fc::variants sign_args = {fc::variant(trx), required_keys["required_keys"], fc::variant(chain_id_type{})};
+   const auto& signed_trx = call(wallet_host, wallet_port, wallet_sign_trx, sign_args);
+   trx = signed_trx.as<SignedTransaction>();
+}
+
+fc::variant push_transaction( SignedTransaction& trx, bool sign ) {
     auto info = get_info();
     trx.expiration = info.head_block_time + 100; //chain.head_block_time() + 100;
-    transaction_helpers::set_reference_block(trx, info.head_block_id);
+    transaction_set_reference_block(trx, info.head_block_id);
     boost::sort( trx.scope );
+
+    if (sign) {
+       sign_transaction(trx);
+    }
 
     return call( push_txn_func, trx );
 }
 
 
-void create_account( const vector<string>& cmd_line ) {
-
-      Name creator(cmd_line[2]);
-      Name newaccount(cmd_line[3]);
-      Name hotcaccnt(config::HotcContractName);
-      Name staked("staked");
-
-      public_key_type owner_key(cmd_line[4]);
-      public_key_type active_key(cmd_line[5]);
-
-      auto owner_auth   = hotc::chain::Authority{1, {{owner_key, 1}}, {}};
-      auto active_auth  = hotc::chain::Authority{1, {{active_key, 1}}, {}};
+void create_account(Name creator, Name newaccount, public_key_type owner, public_key_type active, bool sign) {
+      auto owner_auth   = hotc::chain::Authority{1, {{owner, 1}}, {}};
+      auto active_auth  = hotc::chain::Authority{1, {{active, 1}}, {}};
       auto recovery_auth = hotc::chain::Authority{1, {}, {{{creator, "active"}, 1}}};
 
       uint64_t deposit = 1;
 
       SignedTransaction trx;
-      trx.scope = sort_names({creator,hotcaccnt});
-      transaction_helpers::emplace_message(trx, config::HotcContractName, vector<types::AccountPermission>{{creator,"active"}}, "newaccount",
-                         types::newaccount{creator, newaccount, owner_auth,
-                                           active_auth, recovery_auth, deposit});
-      if (creator == "inita")
-      {
-         fc::optional<fc::ecc::private_key> private_key = hotc::utilities::wif_to_key("5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP79zkvFD3");
-         if (private_key)
-         {
-            wlog("public key ${k}",("k", private_key->get_public_key()));
-            trx.sign(*private_key, hotc::chain::chain_id_type{});
-         }
-      }
-
-      std::cout << fc::json::to_pretty_string( push_transaction(trx) ) << std::endl;
-
-
+      trx.scope = sort_names({creator,config::HotcContractName});
+      transaction_emplace_message(trx, config::HotcContractName, vector<types::AccountPermission>{{creator,"active"}}, "newaccount",
+                                           types::newaccount{creator, newaccount, owner_auth,
+                                                             active_auth, recovery_auth, deposit});
+      std::cout << fc::json::to_pretty_string(push_transaction(trx, sign)) << std::endl;
 }
-
-static const char escape = '\\';
-static const string quote = "'\"";
-
-bool is_quote (const string &line, size_t pos) {
-  if (pos == 0 || pos == string::npos)
-    return (pos == 0);
-
-  if (line[pos-1] == escape) {
-    return (pos == 1) ? false : line[pos-2] == escape;
-  }
-return true;
-}
-
-/**
- * read in the next line of text and split into whitespace separated
- * words, allowing for quoted strings which can span multiple lines
- * if necessary
- **/
-
-char read_line_and_split (vector<string> &cmd_line, char tic) {
-  string line;
-  bool in_quote = (tic != '\0');
-  std::getline(std::cin,line);
-  size_t tic_pos = 0;
-  size_t quote_end = 0;
-  if (in_quote) {
-    size_t last = cmd_line.size() - 1;
-    cmd_line[last] += "\n";
-    for (quote_end = line.find (tic);
-         !is_quote (line,quote_end) && quote_end != string::npos;
-         quote_end = line.find (tic, quote_end + 1));
-
-    if (quote_end == string::npos) {
-      cmd_line[last] += line;
-      return tic;
-    }
-
-    in_quote = false;
-    if (quote_end > 0) {
-      cmd_line[last] += line.substr(0, quote_end);
-    }
-    tic_pos = ++quote_end;
-    tic = '\0';
-  }
-  for (; tic_pos < line.length(); tic_pos++) {
-    if (line[tic_pos] == escape) {
-      line.erase(tic_pos,1);
-      continue;
-    }
-    if (quote.find (line[tic_pos]) != string::npos) {
-      tic = line[tic_pos];
-      vector<string> wrap;
-      string sub = line.substr(quote_end,tic_pos-1);
-      split (wrap, sub, boost::is_any_of(" \t"));
-      for (auto &w : wrap) {
-        cmd_line.emplace_back("");
-        cmd_line[cmd_line.size()-1].swap(w);
-      }
-
-      for (quote_end = line.find (tic,tic_pos+1);
-           quote_end != string::npos && !is_quote(line,quote_end);
-           quote_end = line.find(tic,quote_end + 1));
-
-      if (quote_end == string::npos) {
-        in_quote = true;
-        cmd_line.push_back(line.substr (tic_pos+1));
-        break;
-      }
-      if (quote_end == tic_pos+1) {
-        cmd_line.push_back("");
-      }
-      else {
-        size_t len = quote_end - (tic_pos+1);
-        cmd_line.push_back(line.substr (tic_pos+1, len));
-      }
-      tic_pos = quote_end++;
-    }
-  }
-
-  if (in_quote) {
-    return tic;
-  }
-  if (quote_end == 0 && cmd_line.size() == 0) {
-    split (cmd_line, line, boost::is_any_of(" \t"));
-  }
-  else {
-    vector<string> wrap;
-    string sub = line.substr(quote_end,tic_pos-1);
-    split (wrap, sub, boost::is_any_of(" \t"));
-    for (auto &w : wrap) {
-      if (w.length()) {
-        cmd_line.emplace_back("");
-        cmd_line[cmd_line.size()-1].swap(w);
-      }
-    }
-  }
-  return '\0';
-}
-
-
-
-int send_command (const vector<string> &cmd_line)
-{
-  const auto& command = cmd_line[0];
-  if( command == "help" ) {
-    std::cout << "Command list: info, block, exec, account, push-trx, setcode, transfer, create, import, unlock, lock, do, transaction, and transactions\n";
-    return -1;
-  }
-
-  else if( command == "info" ) {
-    std::cout << fc::json::to_pretty_string( get_info() ) << std::endl;
-  }
-  else if( command == "block" ) {
-    FC_ASSERT( cmd_line.size() == 2 );
-    auto arg=fc::mutable_variant_object( "block_num_or_id", cmd_line[1]);
-    std::cout << fc::json::to_pretty_string( call (get_block_func, arg)) << std::endl;
-  }
-  else if( command == "exec" ) {
-    FC_ASSERT( cmd_line.size() >= 6 );
-    Name code   = cmd_line[1];
-    Name action = cmd_line[2];
-    auto& json   = cmd_line[3];
-    auto arg= fc::mutable_variant_object( "code", code )("action",action)("args", fc::json::from_string(json));
-    auto result = call( json_to_bin_func, arg);
-
-
-    SignedTransaction trx;
-    trx.messages.resize(1);
-    auto& msg = trx.messages.back();
-    msg.code = code;
-    msg.type = action;
-    msg.authorization = fc::json::from_string( cmd_line[5] ).as<vector<types::AccountPermission>>();
-    msg.data = result.get_object()["binargs"].as<Bytes>();
-    trx.scope = fc::json::from_string( cmd_line[4] ).as<vector<Name>>();
-
-    auto trx_result = push_transaction( trx );
-    std::cout << fc::json::to_pretty_string( trx_result ) << std::endl;
-
-  } else if( command == "account" ) {
-    FC_ASSERT( cmd_line.size() == 2 );
-    std::cout << fc::json::to_pretty_string( call( get_account_func,
-                                                   fc::mutable_variant_object( "name", cmd_line[1] ) ) ) << std::endl;
-  }
-  else if( command == "push-trx" ) {
-    auto trx_result = call (push_txn_func, fc::json::from_string( cmd_line[1]));
-    std::cout << fc::json::to_pretty_string(trx_result) << std::endl;
-  } else if ( command == "setcode" ) {
-    if( cmd_line.size() == 1 ) {
-      std::cout << "usage: "<< program << " " << command <<" ACCOUNT FILE.WAST FILE.ABI" << std::endl;
-      return -1;
-    }
-    Name account(cmd_line[1]);
-    const auto& wast_file = cmd_line[2];
-    std::string wast;
-
-    FC_ASSERT( fc::exists(wast_file) );
-    fc::read_file_contents( wast_file, wast );
-    auto wasm = assemble_wast( wast );
-
-
-
-    types::setcode handler;
-    handler.account = account;
-    handler.code.resize(wasm.size());
-    memcpy( handler.code.data(), wasm.data(), wasm.size() );
-
-    if( cmd_line.size() == 4 ) {
-      handler.abi = fc::json::from_file( cmd_line[3] ).as<types::Abi>();
-    }
-
-    SignedTransaction trx;
-    trx.scope = { config::HotcContractName, account };
-    transaction_helpers::emplace_message(trx,  config::HotcContractName, vector<types::AccountPermission>{{account,"active"}},
-                        "setcode", handler );
-
-    std::cout << fc::json::to_pretty_string( push_transaction(trx)  ) << std::endl;
-
-  } else if( command == "transfer" ) {
-    FC_ASSERT( cmd_line.size() == 4 );
-
-    Name sender(cmd_line[1]);
-    Name recipient(cmd_line[2]);
-    uint64_t amount = fc::variant(cmd_line[3]).as_uint64();
-
-    SignedTransaction trx;
-    trx.scope = sort_names({sender,recipient});
-    transaction_helpers::emplace_message(trx, config::HotcContractName, vector<types::AccountPermission>{{sender,"active"}}, "transfer",
-                       types::transfer{sender, recipient, amount});
-    auto info = get_info();
-    trx.expiration = info.head_block_time + 100; //chain.head_block_time() + 100;
-    transaction_helpers::set_reference_block(trx, info.head_block_id);
-
-    std::cout << fc::json::to_pretty_string( call( push_txn_func, trx )) << std::endl;
-  }
-  else if (command == "create" ) {
-    if( cmd_line[1] == "account" ) {
-      if( cmd_line.size() < 6 ) {
-        std::cerr << "usage: " << program << " create account CREATOR NEWACCOUNT OWNERKEY ACTIVEKEY\n";
-        return -1;
-      }
-      create_account( cmd_line );
-    }
-    else if( cmd_line[1] == "key" ) {
-      auto priv = fc::ecc::private_key::generate();
-      auto pub = public_key_type( priv.get_public_key() );
-
-      std::cout << "public: " << string(pub) <<"\n";
-      std::cout << "private: " << key_to_wif(priv.get_secret()) << std::endl;
-    }
-    else {
-      std::cerr << "create doesn't recognize object " << cmd_line[1] << std::endl;
-    }
-  } else if( command == "import" ) {
-    if( cmd_line[1] == "key" ) {
-      auto secret = wif_to_key( cmd_line[2] ); //fc::variant( cmd_line[2] ).as<fc::ecc::private_key_secret>();
-      if( !secret ) {
-        std::cerr << "invalid WIF private key" << std::endl;;
-        return -1;
-      }
-      auto priv = fc::ecc::private_key::regenerate(*secret);
-      auto pub = public_key_type( priv.get_public_key() );
-      std::cout << "public: " << string(pub) << std::endl;;
-    }
-  }else if( command == "unlock" ) {
-
-  } else if( command == "lock" ) {
-
-  } else if( command == "do" ) {
-
-  } else if( command == "transaction" ) {
-     if( cmd_line.size() != 2 )
-     {
-        std::cerr << "usage: " << program << " transaction TRANSACTION_ID\n";
-        return -1;
-     }
-     auto arg= fc::mutable_variant_object( "transaction_id", cmd_line[1]);
-     std::cout << fc::json::to_pretty_string( call( get_transaction_func, arg) ) << std::endl;
-  } else if( command == "transactions" ) {
-     if( cmd_line.size() < 2 || cmd_line.size() > 4 )
-     {
-        std::cerr << "usage: " << program << " transactions ACCOUNT_TO_LOOKUP [SKIP_TO_SEQUENCE [NUMBER_OF_SEQUENCES_TO_RETURN]]\n";
-        return -1;
-     }
-     chain::AccountName account_name(cmd_line[1]);
-     auto arg = (cmd_line.size() == 2)
-           ? fc::mutable_variant_object( "account_name", account_name)
-           : (cmd_line.size() == 3)
-             ? fc::mutable_variant_object( "account_name", account_name)("skip_seq", cmd_line[2])
-             : fc::mutable_variant_object( "account_name", account_name)("skip_seq", cmd_line[2])("num_seq", cmd_line[3]);
-     std::cout << fc::json::to_pretty_string( call( get_transactions_func, arg) ) << std::endl;
-  } else if( command == "accounts" ) {
-     if( cmd_line.size() != 2 )
-     {
-        std::cerr << "usage: " << program << " accounts PUBLIC_KEY\n";
-        return -1;
-     }
-     chain::public_key_type public_key(cmd_line[1]);
-     auto arg = fc::mutable_variant_object( "public_key", public_key);
-     std::cout << fc::json::to_pretty_string( call( get_key_accounts_func, arg) ) << std::endl;
-  }
-  return 0;
-}
-
-
-/**
- *   Usage:
- *
- *   hotcc - [optional command] < script
- *     or *   eocs create wallet walletname  ***PASS1*** ***PASS2***
- *   hotcc unlock walletname  ***PASSWORD***
- *   hotcc create wallet walletname  ***PASS1*** ***PASS2***
- *   hotcc unlock walletname  ***PASSWORD***
- *   hotcc wallets -> prints list of wallets with * next to currently unlocked
- *   hotcc keys -> prints list of private keys
- *   hotcc importkey privatekey -> loads keys
- *   hotcc accounts -> prints list of accounts that reference key
- *   hotcc lock
- *   hotcc do contract action { from to amount }
- *   hotcc transfer from to amount memo  => aliaze for hotcc
- *   hotcc create account creator
- *
- *  if reading from a script all lines are allE parsed before any are sent
- *  reading from the console, lines are acted on directly.
- */
 
 int main( int argc, char** argv ) {
-  vector<string> cmd;
-  bool is_cmd=false;
-  bool from_stdin=false;
-  bool batch=false;
-  uint32_t cycles=1;
-  vector<vector<string> > script;
-  program = argv[0];
+   CLI::App app{"Command Line Interface to Hotc Daemon"};
+   app.require_subcommand();
 
-  for( uint32_t i = 1; i < argc; ++i ) {
-    is_cmd |= (*argv[i] != '-');
-    if (!is_cmd) {
-      from_stdin |= (*(argv[i]+1) == '\0');
-      if (!from_stdin) {
-        // TODO: parse arguments, --batch=<1|0> --cycles=<n> --input=<1|0>
-      }
-    }
-    else {
-      cmd.push_back(string(argv[i]));
-    }
-  }
+   // Create subcommand
+   auto create = app.add_subcommand("create", "Create various items, on and off the blockchain", false);
+   create->require_subcommand();
 
-  try {
-    if (cmd.size()) {
-      int res = 0;
-      if ((res = send_command(cmd)) != 0) {
-        return res;
-      }
-    }
-  } catch ( const fc::exception& e ) {
-    std::cerr << e.to_detail_string() << std::endl;
-    return 0;
-  }
+   // create key
+   create->add_subcommand("key", "Create a new keypair and print the public and private keys")->set_callback([] {
+      auto privateKey = fc::ecc::private_key::generate();
+      std::cout << "Private key: " << key_to_wif(privateKey.get_secret()) << "\n";
+      std::cout << "Public key:  " << string(public_key_type(privateKey.get_public_key())) << std::endl;
+   });
 
-  bool console = isatty(0);
+   // create account
+   string creator;
+   string name;
+   string ownerKey;
+   string activeKey;
+   bool sign = false;
+   auto createAccount = create->add_subcommand("account", "Create a new account on the blockchain", false);
+   createAccount->add_option("creator", creator, "The name of the account creating the new account")->required();
+   createAccount->add_option("name", name, "The name of the new account")->required();
+   createAccount->add_option("OwnerKey", ownerKey, "The owner public key for the account")->required();
+   createAccount->add_option("ActiveKey", activeKey, "The active public key for the account")->required();
+   createAccount->add_flag("-s,--sign", sign, "Specify if unlocked wallet keys should be used to sign transaction");
+   createAccount->set_callback([&] {
+      create_account(creator, name, public_key_type(ownerKey), public_key_type(activeKey), sign);
+   });
 
-  if (from_stdin) {
-    char tic = '\0';
-    vector<string> cmd_line;
-    if (console) {
-      std::cout << "press ^d when done" << std::endl;
-    }
-    while (std::cin.good()) {
-      if (tic == '\0') {
-        cmd_line.clear();
-        if (console) {
-          std::cout << "enter command: " << std::flush;
-        }
+   // Get subcommand
+   auto get = app.add_subcommand("get", "Retrieve various items and information from the blockchain", false);
+   get->require_subcommand();
+
+   // get info
+   get->add_subcommand("info", "Get current blockchain information")->set_callback([] {
+      std::cout << fc::json::to_pretty_string(get_info()) << std::endl;
+   });
+
+   // get block
+   string blockArg;
+   auto getBlock = get->add_subcommand("block", "Retrieve a full block from the blockchain", false);
+   getBlock->add_option("block", blockArg, "The number or ID of the block to retrieve")->required();
+   getBlock->set_callback([&blockArg] {
+      auto arg = fc::mutable_variant_object("block_num_or_id", blockArg);
+      std::cout << fc::json::to_pretty_string(call(get_block_func, arg)) << std::endl;
+   });
+
+   // get account
+   string accountName;
+   auto getAccount = get->add_subcommand("account", "Retrieve an account from the blockchain", false);
+   getAccount->add_option("name", accountName, "The name of the account to retrieve")->required();
+   getAccount->set_callback([&] {
+      std::cout << fc::json::to_pretty_string(call(get_account_func,
+                                                   fc::mutable_variant_object("name", accountName)))
+                << std::endl;
+   });
+
+   // get accounts
+   string publicKey;
+   auto getAccounts = get->add_subcommand("accounts", "Retrieve accounts associated with a public key", false);
+   getAccounts->add_option("public_key", publicKey, "The public key to retrieve accounts for")->required();
+   getAccounts->set_callback([&] {
+      auto arg = fc::mutable_variant_object( "public_key", publicKey);
+      std::cout << fc::json::to_pretty_string(call(get_key_accounts_func, arg)) << std::endl;
+   });
+
+   // get servants
+   string controllingAccount;
+   auto getServants = get->add_subcommand("servants", "Retrieve accounts which are servants of a given account ", false);
+   getServants->add_option("account", controllingAccount, "The name of the controlling account")->required();
+   getServants->set_callback([&] {
+      auto arg = fc::mutable_variant_object( "controlling_account", controllingAccount);
+      std::cout << fc::json::to_pretty_string(call(get_controlled_accounts_func, arg)) << std::endl;
+   });
+
+   // get transaction
+   string transactionId;
+   auto getTransaction = get->add_subcommand("transaction", "Retrieve a transaction from the blockchain", false);
+   getTransaction->add_option("id", transactionId, "ID of the transaction to retrieve")->required();
+   getTransaction->set_callback([&] {
+      auto arg= fc::mutable_variant_object( "transaction_id", transactionId);
+      std::cout << fc::json::to_pretty_string(call(get_transaction_func, arg)) << std::endl;
+   });
+
+   // Contract subcommand
+   string account;
+   string wastPath;
+   string abiPath;
+   auto contractSubcommand = app.add_subcommand("contract", "Create or update the contract on an account");
+   contractSubcommand->add_option("account", account, "The account to publish a contract for")->required();
+   contractSubcommand->add_option("wast-file", wastPath, "The file containing the contract WAST")->required()
+         ->check(CLI::ExistingFile);
+   auto abi = contractSubcommand->add_option("abi-file,-a,--abi", abiPath, "The ABI for the contract")
+              ->check(CLI::ExistingFile);
+   contractSubcommand->add_flag("-s,--sign", sign, "Specify if unlocked wallet keys should be used to sign transaction");
+   contractSubcommand->set_callback([&] {
+      std::string wast;
+      std::cout << "Reading WAST..." << std::endl;
+      fc::read_file_contents(wastPath, wast);
+      std::cout << "Assembling WASM..." << std::endl;
+      auto wasm = assemble_wast(wast);
+
+      types::setcode handler;
+      handler.account = account;
+      handler.code.assign(wasm.begin(), wasm.end());
+      if (abi->count())
+         handler.abi = fc::json::from_file(abiPath).as<types::Abi>();
+
+      SignedTransaction trx;
+      trx.scope = sort_names({config::HotcContractName, account});
+      transaction_emplace_message(trx, config::HotcContractName, vector<types::AccountPermission>{{account,"active"}},
+                                           "setcode", handler);
+
+      std::cout << "Publishing contract..." << std::endl;
+      std::cout << fc::json::to_pretty_string(push_transaction(trx, sign)) << std::endl;
+   });
+
+   // Transfer subcommand
+   string sender;
+   string recipient;
+   uint64_t amount;
+   string memo;
+   auto transfer = app.add_subcommand("transfer", "Transfer HOTC from account to account", false);
+   transfer->add_option("sender", sender, "The account sending HOTC")->required();
+   transfer->add_option("recipient", recipient, "The account receiving HOTC")->required();
+   transfer->add_option("amount", amount, "The amount of HOTC to send")->required();
+   transfer->add_option("memo", memo, "The memo for the transfer");
+   transfer->add_flag("-s,--sign", sign, "Specify if unlocked wallet keys should be used to sign transaction");
+   transfer->set_callback([&] {
+      SignedTransaction trx;
+      trx.scope = sort_names({sender,recipient});
+      transaction_emplace_message(trx, config::HotcContractName,
+                                           vector<types::AccountPermission>{{sender,"active"}},
+                                           "transfer", types::transfer{sender, recipient, amount, memo});
+      auto info = get_info();
+      trx.expiration = info.head_block_time + 100; //chain.head_block_time() + 100;
+      transaction_set_reference_block(trx, info.head_block_id);
+      if (sign) {
+         sign_transaction(trx);
       }
 
-      tic = read_line_and_split(cmd_line, tic);
-      if (tic != '\0') {
-        continue;
+      std::cout << fc::json::to_pretty_string( call( push_txn_func, trx )) << std::endl;
+   });
+
+
+   // Wallet subcommand
+   auto wallet = app.add_subcommand( "wallet", "Interact with local wallet", false );
+
+   // create wallet
+   string wallet_name;
+   auto createWallet = wallet->add_subcommand("create", "Create a new wallet locally", false);
+   createWallet->add_option("name", wallet_name, "The name of the new wallet")->required();
+   createWallet->set_callback([&wallet_name] {
+      const auto& v = call(wallet_host, wallet_port, wallet_create, wallet_name);
+      std::cout << "Save password to use in the future to unlock this wallet." << std::endl;
+      std::cout << "Without password imported keys will not be retrievable." << std::endl;
+      std::cout << fc::json::to_pretty_string(v) << std::endl;
+   });
+
+   // open wallet
+   auto openWallet = wallet->add_subcommand("open", "Open an existing wallet", false);
+   openWallet->add_option("name", wallet_name, "The name of the wallet to open")->required();
+   openWallet->set_callback([&wallet_name] {
+      const auto& v = call(wallet_host, wallet_port, wallet_open, wallet_name);
+      std::cout << fc::json::to_pretty_string(v) << std::endl;
+   });
+
+   // lock wallet
+   auto lockWallet = wallet->add_subcommand("lock", "Lock wallet", false);
+   lockWallet->add_option("name", wallet_name, "The name of the wallet to lock")->required();
+   lockWallet->set_callback([&wallet_name] {
+      const auto& v = call(wallet_host, wallet_port, wallet_lock, wallet_name);
+      std::cout << fc::json::to_pretty_string(v) << std::endl;
+   });
+
+   // lock all wallets
+   auto locakAllWallets = wallet->add_subcommand("lock_all", "Lock all unlocked wallets", false);
+   locakAllWallets->set_callback([] {
+      const auto& v = call(wallet_host, wallet_port, wallet_lock_all);
+      std::cout << fc::json::to_pretty_string(v) << std::endl;
+   });
+
+   // unlock wallet
+   string wallet_pw;
+   auto unlockWallet = wallet->add_subcommand("unlock", "Unlock wallet", false);
+   unlockWallet->add_option("name", wallet_name, "The name of the wallet to unlock")->required();
+   unlockWallet->add_option("password", wallet_pw, "The password returned by wallet create")->required();
+   unlockWallet->set_callback([&wallet_name, &wallet_pw] {
+      fc::variants vs = {fc::variant(wallet_name), fc::variant(wallet_pw)};
+      const auto& v = call(wallet_host, wallet_port, wallet_unlock, vs);
+      std::cout << fc::json::to_pretty_string(v) << std::endl;
+   });
+
+   // import keys into wallet
+   string wallet_key;
+   auto importWallet = wallet->add_subcommand("import", "Import private key into wallet", false);
+   importWallet->add_option("name", wallet_name, "The name of the wallet to import key into")->required();
+   importWallet->add_option("key", wallet_key, "Private key in WIF format to import")->required();
+   importWallet->set_callback([&wallet_name, &wallet_key] {
+      fc::variants vs = {fc::variant(wallet_name), fc::variant(wallet_key)};
+      const auto& v = call(wallet_host, wallet_port, wallet_import_key, vs);
+      std::cout << fc::json::to_pretty_string(v) << std::endl;
+   });
+
+   // list wallets
+   auto listWallet = wallet->add_subcommand("list", "List opened wallets, * = unlocked", false);
+   listWallet->set_callback([] {
+      const auto& v = call(wallet_host, wallet_port, wallet_list);
+      std::cout << fc::json::to_pretty_string(v) << std::endl;
+   });
+
+   // list keys
+   auto listKeys = wallet->add_subcommand("keys", "List of private keys from all unlocked wallets in wif format.", false);
+   listKeys->set_callback([] {
+      const auto& v = call(wallet_host, wallet_port, wallet_list_keys);
+      std::cout << fc::json::to_pretty_string(v) << std::endl;
+   });
+
+   // Benchmark subcommand
+   auto benchmark = app.add_subcommand( "benchmark", "Configure and execute benchmarks", false );
+   auto benchmark_setup = benchmark->add_subcommand( "setup", "Configures initial condition for benchmark" );
+   uint64_t number_of_accounts = 2;
+   benchmark_setup->add_option("accounts", number_of_accounts, "the number of accounts in transfer among")->required();
+   benchmark_setup->set_callback([&]{
+      std::cerr << "Creating " << number_of_accounts <<" accounts with initial balances\n";
+      FC_ASSERT( number_of_accounts >= 2, "must create at least 2 accounts" );
+
+      auto info = get_info();
+
+      vector<SignedTransaction> batch;
+      batch.reserve( number_of_accounts );
+      for( uint32_t i = 0; i < number_of_accounts; ++i ) {
+        Name newaccount( Name("benchmark").value + i );
+        public_key_type owner, active;
+        Name creator("inita" );
+
+        auto owner_auth   = hotc::chain::Authority{1, {{owner, 1}}, {}};
+        auto active_auth  = hotc::chain::Authority{1, {{active, 1}}, {}};
+        auto recovery_auth = hotc::chain::Authority{1, {}, {{{creator, "active"}, 1}}};
+        
+        uint64_t deposit = 1;
+        
+        SignedTransaction trx;
+        trx.scope = sort_names({creator,config::HotcContractName});
+        transaction_emplace_message(trx, config::HotcContractName, vector<types::AccountPermission>{{creator,"active"}}, "newaccount",
+                                             types::newaccount{creator, newaccount, owner_auth,
+                                                               active_auth, recovery_auth, deposit});
+
+        trx.expiration = info.head_block_time + 100; 
+        transaction_set_reference_block(trx, info.head_block_id);
+        batch.emplace_back(trx);
+      }
+      auto result = call( push_txns_func, batch );
+      std::cout << fc::json::to_pretty_string(result) << std::endl;
+   });
+
+   auto benchmark_transfer = benchmark->add_subcommand( "transfer", "executes random transfers among accounts" );
+   uint64_t number_of_transfers = 0;
+   bool loop = false;
+   benchmark_transfer->add_option("accounts", number_of_accounts, "the number of accounts in transfer among")->required();
+   benchmark_transfer->add_option("count", number_of_transfers, "the number of transfers to execute")->required();
+   benchmark_transfer->add_option("loop", loop, "whether or not to loop for ever");
+   benchmark_transfer->set_callback([&]{
+      FC_ASSERT( number_of_accounts > 1 );
+
+      std::cerr << "funding "<< number_of_accounts << " accounts from init\n";
+      auto info = get_info();
+      vector<SignedTransaction> batch;
+      batch.reserve(100);
+      for( uint32_t i = 0; i < number_of_accounts; ++i ) {
+         Name sender( "initb" );
+         Name recipient( Name("benchmark").value + i);
+         uint32_t amount = 100000;
+
+         SignedTransaction trx;
+         trx.scope = sort_names({sender,recipient});
+         transaction_emplace_message(trx, config::HotcContractName,
+                                              vector<types::AccountPermission>{{sender,"active"}},
+                                              "transfer", types::transfer{sender, recipient, amount, memo});
+         trx.expiration = info.head_block_time + 100; 
+         transaction_set_reference_block(trx, info.head_block_id);
+
+         batch.emplace_back(trx);
+         if( batch.size() == 100 ) {
+            auto result = call( push_txns_func, batch );
+      //      std::cout << fc::json::to_pretty_string(result) << std::endl;
+            batch.resize(0);
+         }
+      }
+      if( batch.size() ) {
+         auto result = call( push_txns_func, batch );
+         //std::cout << fc::json::to_pretty_string(result) << std::endl;
+         batch.resize(0);
       }
 
-      if (!console || batch) {
-        script.push_back (cmd_line);
-      }
-      else {
-        send_command (cmd_line);
-      }
-    }
-  }
 
-  try {
-    int res = 0;
-    while (cycles--) {
-      for (auto scmd : script) {
-        if ((res = send_command (scmd)) != 0) {
-          return res;
-        }
+      std::cerr << "generating random "<< number_of_transfers << " transfers among " << number_of_accounts << " benchmark accounts\n";
+      while( true ) {
+         auto info = get_info();
+         uint64_t amount = 1;
+
+         for( uint32_t i = 0; i < number_of_transfers; ++i ) {
+            SignedTransaction trx;
+
+            Name sender( Name("benchmark").value + rand() % number_of_accounts );
+            Name recipient( Name("benchmark").value + rand() % number_of_accounts );
+
+            while( recipient == sender )
+               recipient = Name( Name("benchmark").value + rand() % number_of_accounts );
+
+
+            auto memo = fc::variant(fc::time_point::now()).as_string() + " " + fc::variant(fc::time_point::now().time_since_epoch()).as_string();
+            trx.scope = sort_names({sender,recipient});
+            transaction_emplace_message(trx, config::HotcContractName,
+                                                 vector<types::AccountPermission>{{sender,"active"}},
+                                                 "transfer", types::transfer{sender, recipient, amount, memo});
+            trx.expiration = info.head_block_time + 100; 
+            transaction_set_reference_block(trx, info.head_block_id);
+
+            batch.emplace_back(trx);
+            if( batch.size() == 600 ) {
+               auto result = call( push_txns_func, batch );
+               //std::cout << fc::json::to_pretty_string(result) << std::endl;
+               batch.resize(0);
+            }
+         }
+         if( !loop ) break;
       }
-    }
-  } catch ( const fc::exception& e ) {
-    std::cerr << e.to_detail_string() << std::endl;
-  }
-  return 0;
+   });
+
+   
+
+   // Push subcommand
+   auto push = app.add_subcommand("push", "Push arbitrary data to the blockchain", false);
+   push->require_subcommand();
+
+   // push message
+   vector<string> permissions;
+   string contract;
+   string action;
+   string data;
+   vector<string> scopes;
+   auto messageSubcommand = push->add_subcommand("message", "Push a transaction with a single message");
+   messageSubcommand->fallthrough(false);
+   messageSubcommand->add_option("contract", contract,
+                                 "The account providing the contract to execute", true)->required();
+   messageSubcommand->add_option("action", action, "The action to execute on the contract", true)
+         ->required();
+   messageSubcommand->add_option("data", data, "The arguments to the contract")->required();
+   messageSubcommand->add_option("-p,--permission", permissions,
+                                 "An account and permission level to authorize, as in 'account@permission'");
+   messageSubcommand->add_option("-s,--scope", scopes, "An account in scope for this operation", true);
+   messageSubcommand->add_flag("--sign", sign, "Specify if unlocked wallet keys should be used to sign transaction");
+   messageSubcommand->set_callback([&] {
+      ilog("Converting argument to binary...");
+      auto arg= fc::mutable_variant_object
+                ("code", contract)
+                ("action", action)
+                ("args", fc::json::from_string(data));
+      auto result = call(json_to_bin_func, arg);
+
+      auto fixedPermissions = permissions | boost::adaptors::transformed([](const string& p) {
+         vector<string> pieces;
+         boost::split(pieces, p, boost::is_any_of("@"));
+         FC_ASSERT(pieces.size() == 2, "Invalid permission: ${p}", ("p", p));
+         return types::AccountPermission(pieces[0], pieces[1]);
+      });
+
+      SignedTransaction trx;
+      transaction_emplace_serialized_message(trx, contract, action,
+                                                      vector<types::AccountPermission>{fixedPermissions.front(),
+                                                                                       fixedPermissions.back()},
+                                                      result.get_object()["binargs"].as<Bytes>());
+      trx.scope.assign(scopes.begin(), scopes.end());
+      ilog("Transaction result:\n${r}", ("r", fc::json::to_pretty_string(push_transaction(trx, sign))));
+   });
+
+   // push transaction
+   string trxJson;
+   auto trxSubcommand = push->add_subcommand("transaction", "Push an arbitrary JSON transaction");
+   trxSubcommand->add_option("transaction", trxJson, "The JSON of the transaction to push")->required();
+   trxSubcommand->set_callback([&] {
+      auto trx_result = call(push_txn_func, fc::json::from_string(trxJson));
+      std::cout << fc::json::to_pretty_string(trx_result) << std::endl;
+   });
+
+
+   string trxsJson;
+   auto trxsSubcommand = push->add_subcommand("transactions", "Push an array of arbitrary JSON transactions");
+   trxsSubcommand->add_option("transactions", trxsJson, "The JSON array of the transactions to push")->required();
+   trxsSubcommand->set_callback([&] {
+      auto trxs_result = call(push_txn_func, fc::json::from_string(trxsJson));
+      std::cout << fc::json::to_pretty_string(trxs_result) << std::endl;
+   });
+
+   try {
+       app.parse(argc, argv);
+   } catch (const CLI::ParseError &e) {
+       return app.exit(e);
+   } catch (const fc::exception& e) {
+      auto errorString = e.to_detail_string();
+      if (errorString.find("Connection refused") != string::npos) {
+         if (errorString.find(fc::json::to_string(port)) != string::npos) {
+            elog("Failed to connect to hotcd at ${ip}:${port}; is hotcd running?", ("ip", host)("port", port));
+         } else if (errorString.find(fc::json::to_string(wallet_port)) != string::npos) {
+            elog("Failed to connect to hotc-walletd at ${ip}:${port}; is hotc-walletd running?", ("ip", wallet_host)("port", wallet_port));
+         } else {
+            elog("Failed to connect with error: ${e}", ("e", e.to_detail_string()));
+         }
+      } else {
+         elog("Failed with error: ${e}", ("e", e.to_detail_string()));
+      }
+      return 1;
+   }
+
+   return 0;
 }
