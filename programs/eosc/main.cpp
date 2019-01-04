@@ -12,6 +12,7 @@
 #include <boost/range/algorithm/sort.hpp>
 #include <boost/range/adaptor/transformed.hpp>
 #include <boost/algorithm/string/split.hpp>
+#include <boost/range/algorithm/copy.hpp>
 
 #include <Inline/BasicTypes.h>
 #include <IR/Module.h>
@@ -170,6 +171,7 @@ void create_account(Name creator, Name newaccount, public_key_type owner, public
 int main( int argc, char** argv ) {
    CLI::App app{"Command Line Interface to Hotc Daemon"};
    app.require_subcommand();
+   app.add_option( "-p,--port", port, "the port where hotcd is running", true );
 
    // Create subcommand
    auto create = app.add_subcommand("create", "Create various items, on and off the blockchain", false);
@@ -251,6 +253,23 @@ int main( int argc, char** argv ) {
    getTransaction->set_callback([&] {
       auto arg= fc::mutable_variant_object( "transaction_id", transactionId);
       std::cout << fc::json::to_pretty_string(call(get_transaction_func, arg)) << std::endl;
+   });
+
+   // get transactions
+   string account_name;
+   string skip_seq;
+   string num_seq;
+   auto getTransactions = get->add_subcommand("transactions", "Retrieve all transactions with specific account name referenced in their scope", false);
+   getTransactions->add_option("account_name", account_name, "Name of account to query on")->required();
+   getTransactions->add_option("skip_seq", skip_seq, "Number of most recent transactions to skip (0 would start at most recent transaction)");
+   getTransactions->add_option("num_seq", num_seq, "Number of transactions to return");
+   getTransactions->set_callback([&] {
+      auto arg = (skip_seq.empty())
+                  ? fc::mutable_variant_object( "account_name", account_name)
+                  : (num_seq.empty())
+                     ? fc::mutable_variant_object( "account_name", account_name)("skip_seq", skip_seq)
+                     : fc::mutable_variant_object( "account_name", account_name)("skip_seq", skip_seq)("num_seq", num_seq);
+      std::cout << fc::json::to_pretty_string(call(get_transactions_func, arg)) << std::endl;
    });
 
    // Contract subcommand
@@ -538,9 +557,9 @@ int main( int argc, char** argv ) {
       });
 
       SignedTransaction trx;
-      transaction_emplace_serialized_message(trx, contract, action,
-                                                      vector<types::AccountPermission>{fixedPermissions.front(),
-                                                                                       fixedPermissions.back()},
+      vector<types::AccountPermission> accountPermissions;
+      boost::copy(fixedPermissions, std::back_inserter(accountPermissions)); 
+      transaction_emplace_serialized_message(trx, contract, action, accountPermissions,
                                                       result.get_object()["binargs"].as<Bytes>());
       trx.scope.assign(scopes.begin(), scopes.end());
       ilog("Transaction result:\n${r}", ("r", fc::json::to_pretty_string(push_transaction(trx, sign))));
