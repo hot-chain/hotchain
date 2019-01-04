@@ -130,8 +130,8 @@ namespace hotc {
                my->server.set_http_handler([&](connection_hdl hdl) {
                   auto con = my->server.get_con_from_hdl(hdl);
                   try {
-                     // ilog("handle http request: ${url}", ("url",con->get_uri()->str()));
-                     // ilog("${body}", ("body", con->get_request_body()));
+                     //ilog("handle http request: ${url}", ("url",con->get_uri()->str()));
+                     //ilog("${body}", ("body", con->get_request_body()));
 
                      auto body = con->get_request_body();
                      auto resource = con->get_uri()->get_resource();
@@ -140,6 +140,7 @@ namespace hotc {
                         handler_itr->second(resource, body, [con,this](int code, string body) {
                            con->set_body(body);
                            con->set_status(websocketpp::http::status_code::value(code));
+                           con->append_header("Access-Control-Allow-Origin", "*");
                         });
                      } else {
                         wlog("404 - not found: ${ep}", ("ep",resource));
