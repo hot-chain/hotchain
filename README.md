@@ -1,8 +1,8 @@
-﻿# Hotc
+﻿# hotc
 
-[![Build Status](https://travis-ci.org/HOTCIO/hotc.svg?branch=master)](https://travis-ci.org/HOTCIO/hotc)
+[![Build Status](https://travis-ci.org/hotcIO/hotc.svg?branch=master)](https://travis-ci.org/hotcIO/hotc)
 
-Welcome to the HOTC.IO source code repository!
+Welcome to the hotc.IO source code repository!
 
 ## Getting Started
 The following instructions overview the process of getting the software, building it, running a simple test network that produces blocks, account creation and uploading a sample contract to the blockchain.
@@ -14,6 +14,7 @@ Dependencies:
 * Clang 4.0.0
 * CMake 3.5.1
 * Boost 1.64
+* OpenSSL
 * LLVM 4.0
 * [secp256k1-zkp (Cryptonomex branch)](https://github.com/cryptonomex/secp256k1-zkp.git)
 
@@ -43,12 +44,7 @@ cd boost_1_64_0/
 ./b2 install
 ```
 
-### Installing Dependencies
-Hotc has the following external dependencies, which must be installed on your system:
- - Boost 1.64
- - OpenSSL
- - LLVM 4.0 (Ubuntu users must install llvm-4.0 packages from https://apt.llvm.org/)
- - [secp256k1-zkp (Cryptonomex branch)](https://github.com/cryptonomex/secp256k1-zkp.git)
+### LLVM with WASM build target
 
 By default LLVM and clang do not include the WASM build target, so you will have to build it yourself. Note that following these instructions will create a version of LLVM that can only build WASM targets.
 
@@ -125,7 +121,7 @@ echo "export LLVM_DIR=/usr/local/Cellar/llvm/4.0.1/lib/cmake/llvm" >> ~/.bash_pr
 ```
 
 ### Getting the code
-To download all of the code, download Hotc and a recursion or two of submodules. The easiest way to get all of this is to do a recursive clone:
+To download all of the code, download hotc and a recursion or two of submodules. The easiest way to get all of this is to do a recursive clone:
 
 `git clone https://github.com/hotcio/hotc --recursive`
 
@@ -276,7 +272,7 @@ cd ~/hotc/build/programs/hotcc/
 
 ## Run hotc in docker
 
-Simple and fast setup of HOTC on Docker is also available. Firstly, install dependencies:
+Simple and fast setup of hotc on Docker is also available. Firstly, install dependencies:
 
  - [Docker](https://docs.docker.com)
  - [Docker-compose](https://github.com/docker/compose)
@@ -285,7 +281,7 @@ Simple and fast setup of HOTC on Docker is also available. Firstly, install depe
 Build hotc image
 
 ```
-git clone https://github.com/HOTCIO/hotc.git --recursive
+git clone https://github.com/hotcIO/hotc.git --recursive
 cd hotc
 cp genesis.json Docker 
 docker build -t hotcio/hotc -f Docker/Dockerfile .
