@@ -4,6 +4,7 @@ add_library( hotc_types
              Asset.cpp
              PublicKey.cpp
              TypeParser.cpp
+             AbiSerializer.cpp
              native.cpp
              ${HEADERS}
              "${CMAKE_CURRENT_SOURCE_DIR}/include/hotc/types/generated.hpp"
@@ -19,4 +20,11 @@ target_link_libraries( type_generator hotc_utilities fc ${CMAKE_DL_LIBS} ${PLATF
 add_custom_command( OUTPUT  "${CMAKE_CURRENT_SOURCE_DIR}/include/hotc/types/generated.hpp"
                     COMMAND ${CMAKE_CURRENT_BINARY_DIR}/type_generator ${CMAKE_CURRENT_SOURCE_DIR}/types.hotc ${CMAKE_CURRENT_SOURCE_DIR}/include/hotc/types/generated.hpp
                     DEPENDS types.hotc type_generator )
+INSTALL( TARGETS
+   hotc_types
 
+   RUNTIME DESTINATION bin
+   LIBRARY DESTINATION lib
+   ARCHIVE DESTINATION lib
+)
+INSTALL( FILES ${HEADERS} DESTINATION "include/hotc/types" )
