@@ -23,12 +23,12 @@
  */
 
 #include <hotc/chain/chain_controller.hpp>
-#include <hotc/chain/exceptions.hpp>
 
 #include <hotc/chain/block_summary_object.hpp>
 #include <hotc/chain/global_property_object.hpp>
 #include <hotc/chain/key_value_object.hpp>
 #include <hotc/chain/action_objects.hpp>
+#include <hotc/chain/generated_transaction_object.hpp>
 #include <hotc/chain/transaction_object.hpp>
 #include <hotc/chain/producer_object.hpp>
 #include <hotc/chain/permission_link_object.hpp>
@@ -54,11 +54,9 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
-
-//#include <Wren++.h>
+#include <chrono>
 
 namespace hotc { namespace chain {
-
 
 bool chain_controller::is_known_block(const block_id_type& id)const
 {
@@ -131,6 +129,13 @@ std::vector<block_id_type> chain_controller::get_block_ids_on_fork(block_id_type
     result.emplace_back(fork_block->id);
   result.emplace_back(branches.first.back()->previous_id());
   return result;
+}
+
+const GeneratedTransaction& chain_controller::get_generated_transaction( const generated_transaction_id_type& id ) const {
+   auto& index = _db.get_index<generated_transaction_multi_index, generated_transaction_object::by_trx_id>();
+   auto itr = index.find(id);
+   FC_ASSERT(itr != index.end());
+   return itr->trx;
 }
 
 /**
@@ -210,7 +215,25 @@ bool chain_controller::_push_block(const signed_block& new_block)
 
    try {
       auto session = _db.start_undo_session(true);
+      auto exec_start = std::chrono::high_resolution_clock::now();
       apply_block(new_block, skip);
+      if( (fc::time_point::now() - new_block.timestamp) < fc::seconds(60) )
+      {
+         auto exec_stop = std::chrono::high_resolution_clock::now();
+         auto exec_ms = std::chrono::duration_cast<std::chrono::milliseconds>(exec_stop - exec_start);      
+         size_t trxcount = 0;
+         for (const auto& cycle : new_block.cycles)
+            for (const auto& thread : cycle)
+               trxcount += thread.user_input.size();
+         ilog( "${producer} #${num} @${time}  | ${trxcount} trx, ${pending} pending, exectime_ms=${extm}", 
+            ("producer", new_block.producer) 
+            ("time", new_block.timestamp)
+            ("num", new_block.block_num())
+            ("trxcount", trxcount)
+            ("pending", _pending_transactions.size())
+            ("extm", exec_ms.count())
+         );
+      }
       session.push();
    } catch ( const fc::exception& e ) {
       elog("Failed to push new block:\n${e}", ("e", e.to_detail_string()));
@@ -248,7 +271,7 @@ ProcessedTransaction chain_controller::_push_transaction(const SignedTransaction
    auto temp_session = _db.start_undo_session(true);
    validate_referenced_accounts(trx);
    check_transaction_authorization(trx);
-   auto pt = _apply_transaction(trx);
+   auto pt = apply_transaction(trx);
    _pending_transactions.push_back(trx);
 
    // notify_changed_objects();
@@ -256,22 +279,22 @@ ProcessedTransaction chain_controller::_push_transaction(const SignedTransaction
    temp_session.squash();
 
    // notify anyone listening to pending transactions
-   on_pending_transaction(trx); /// TODO move this to apply...
+   on_pending_transaction(trx); /// TODO move this to apply... ??? why... 
 
    return pt;
 }
-
 
 signed_block chain_controller::generate_block(
    fc::time_point_sec when,
    const AccountName& producer,
    const fc::ecc::private_key& block_signing_private_key,
+   block_schedule::factory scheduler, /* = block_schedule::by_threading_conflits */
    uint32_t skip /* = 0 */
    )
 { try {
    return with_skip_flags( skip, [&](){
       auto b = _db.with_write_lock( [&](){
-         return _generate_block( when, producer, block_signing_private_key );
+         return _generate_block( when, producer, block_signing_private_key, scheduler );
       });
       push_block(b, skip);
       return b;
@@ -281,7 +304,8 @@ signed_block chain_controller::generate_block(
 signed_block chain_controller::_generate_block(
    fc::time_point_sec when,
    const AccountName& producer,
-   const fc::ecc::private_key& block_signing_private_key
+   const fc::ecc::private_key& block_signing_private_key,
+   block_schedule::factory scheduler
    )
 {
    try {
@@ -296,12 +320,7 @@ signed_block chain_controller::_generate_block(
    if( !(skip & skip_producer_signature) )
       FC_ASSERT( producer_obj.signing_key == block_signing_private_key.get_public_key() );
 
-   static const size_t max_block_header_size = fc::raw::pack_size( signed_block_header() ) + 4;
-   auto maximum_block_size = get_global_properties().configuration.maxBlockSize;
-   size_t total_block_size = max_block_header_size;
-
-   signed_block pending_block;
-
+  
    //
    // The following code throws away existing pending_tx_session and
    // rebuilds it by re-applying pending transactions.
@@ -316,45 +335,105 @@ signed_block chain_controller::_generate_block(
    _pending_tx_session.reset();
    _pending_tx_session = _db.start_undo_session(true);
 
-   uint64_t postponed_tx_count = 0;
-   // pop pending state (reset to head block state)
-   for( const SignedTransaction& tx : _pending_transactions )
-   {
-      size_t new_total_size = total_block_size + fc::raw::pack_size( tx );
+   const auto& generated = _db.get_index<generated_transaction_multi_index, generated_transaction_object::by_status>().equal_range(generated_transaction_object::PENDING);
 
-      // postpone transaction if it would make block too big
-      if( new_total_size >= maximum_block_size )
-      {
-         postponed_tx_count++;
-         continue;
-      }
-
-      try
-      {
-         auto temp_session = _db.start_undo_session(true);
-         validate_referenced_accounts(tx);
-         check_transaction_authorization(tx);
-         _apply_transaction(tx);
-         temp_session.squash();
-
-         total_block_size += fc::raw::pack_size(tx);
-         if (pending_block.cycles.empty()) {
-            pending_block.cycles.resize(1);
-            pending_block.cycles.back().resize(1);
-         }
-         pending_block.cycles.back().back().user_input.emplace_back(tx);
-#warning TODO: Populate generated blocks with generated transactions
-      }
-      catch ( const fc::exception& e )
-      {
-         // Do nothing, transaction will not be re-applied
-         wlog( "Transaction was not processed while generating block due to ${e}", ("e", e) );
-         wlog( "The transaction was ${t}", ("t", tx) );
-      }
+   vector<pending_transaction> pending;
+   std::set<transaction_id_type> invalid_pending;
+   pending.reserve(std::distance(generated.first, generated.second) + _pending_transactions.size());
+   for (auto iter = generated.first; iter != generated.second; ++iter) {
+      const auto& gt = *iter;
+      pending.emplace_back(std::reference_wrapper<const GeneratedTransaction> {gt.trx});
    }
+   
+   for(const auto& st: _pending_transactions) {
+      pending.emplace_back(std::reference_wrapper<const SignedTransaction> {st});
+   }
+
+   auto schedule = scheduler(pending, get_global_properties());
+
+   signed_block pending_block;
+   pending_block.cycles.reserve(schedule.cycles.size());
+
+   size_t invalid_transaction_count = 0;
+   size_t valid_transaction_count = 0;
+
+   for (const auto &c : schedule.cycles) {
+     cycle block_cycle;
+     block_cycle.reserve(c.size());
+
+     for (const auto &t : c) {
+       thread block_thread;
+       block_thread.user_input.reserve(t.transactions.size());
+       block_thread.generated_input.reserve(t.transactions.size());
+       for (const auto &trx : t.transactions) {
+          try
+          {
+             auto temp_session = _db.start_undo_session(true);
+             if (trx.contains<std::reference_wrapper<const SignedTransaction>>()) {
+                const auto& t = trx.get<std::reference_wrapper<const SignedTransaction>>().get();
+                validate_referenced_accounts(t);
+                check_transaction_authorization(t);
+                auto processed = apply_transaction(t);
+                block_thread.user_input.emplace_back(processed);
+             } else if (trx.contains<std::reference_wrapper<const GeneratedTransaction>>()) {
+                const auto& t = trx.get<std::reference_wrapper<const GeneratedTransaction>>().get();
+                auto processed = apply_transaction(t);
+                block_thread.generated_input.emplace_back(processed);
+             } else {
+                FC_THROW_EXCEPTION(tx_scheduling_exception, "Unknown transaction type in block_schedule");
+             }
+             
+             temp_session.squash();
+             valid_transaction_count++;
+          }
+          catch ( const fc::exception& e )
+          {
+             // Do nothing, transaction will not be re-applied
+             elog( "Transaction was not processed while generating block due to ${e}", ("e", e) );
+             if (trx.contains<std::reference_wrapper<const SignedTransaction>>()) {
+                const auto& t = trx.get<std::reference_wrapper<const SignedTransaction>>().get();
+                wlog( "The transaction was ${t}", ("t", t ) );
+                invalid_pending.emplace(t.id());
+             } else if (trx.contains<std::reference_wrapper<const GeneratedTransaction>>()) {
+                wlog( "The transaction was ${t}", ("t", trx.get<std::reference_wrapper<const GeneratedTransaction>>().get()) );
+             } 
+             invalid_transaction_count++;
+          }
+       }
+
+       if (!(block_thread.generated_input.empty() && block_thread.user_input.empty())) {
+          block_thread.generated_input.shrink_to_fit();
+          block_thread.user_input.shrink_to_fit();
+          block_cycle.emplace_back(std::move(block_thread));
+       }
+     }
+
+     if (!block_cycle.empty()) {
+        pending_block.cycles.emplace_back(std::move(block_cycle));
+     }
+   }
+   
+   size_t postponed_tx_count = pending.size() - valid_transaction_count - invalid_transaction_count;
    if( postponed_tx_count > 0 )
    {
       wlog( "Postponed ${n} transactions due to block size limit", ("n", postponed_tx_count) );
+   }
+
+   if( invalid_transaction_count > 0 )
+   {
+      wlog( "Postponed ${n} transactions errors when processing", ("n", invalid_transaction_count) );
+
+      // remove pending transactions determined to be bad during scheduling
+      if (invalid_pending.size() > 0) {
+         for (auto itr = _pending_transactions.begin(); itr != _pending_transactions.end(); ) {
+            auto& tx = *itr;
+            if (invalid_pending.find(tx.id()) != invalid_pending.end()) {
+               itr = _pending_transactions.erase(itr);
+            } else {
+               ++itr;
+            }
+         }
+      }
    }
 
    _pending_tx_session.reset();
@@ -427,7 +506,157 @@ void chain_controller::apply_block(const signed_block& next_block, uint32_t skip
       if (_checkpoints.rbegin()->first >= block_num)
          skip = ~0;// WE CAN SKIP ALMOST EVERYTHING
    }
-   with_skip_flags(skip, [&](){ _apply_block(next_block); });
+
+   with_applying_block([&] {
+      with_skip_flags(skip, [&] {
+         _apply_block(next_block);
+      });
+   });
+}
+
+struct path_cons_list {
+   typedef static_variant<int, const char *> head_type;
+   typedef const path_cons_list* tail_ref_type;
+   typedef optional<tail_ref_type> tail_type;
+   
+   path_cons_list(int index, const path_cons_list &rest) 
+      : head(head_type(index))
+      , tail(tail_ref_type(&rest))
+   { }
+
+   path_cons_list(const char *path, const path_cons_list &rest) 
+      : head(head_type(path))
+      , tail(tail_ref_type(&rest))
+   { }
+
+   path_cons_list(const char *path) 
+      : head(head_type(path))
+      , tail()
+   { }
+
+   //path_cons_list( path_cons_list && ) = delete;
+   
+   const head_type head;
+   tail_type tail;
+
+   path_cons_list operator() (int index) const {
+      return path_cons_list(index, *this);
+   }
+
+   path_cons_list operator() (const char *path) const {
+      return path_cons_list(path, *this);
+   }
+
+   void add_to_stream( std::stringstream& ss ) const {
+      if (tail) {
+         (*tail)->add_to_stream(ss);
+      }
+
+      if (head.contains<int>()) {
+         ss << "[" << head.get<int>() << "]";
+      } else {
+         ss << head.get<const char *>();
+      }
+   }
+};
+
+string resolve_path_string(const path_cons_list& path) {
+   std::stringstream ss;
+   path.add_to_stream(ss);
+   return ss.str();
+}
+
+template<typename T>
+void check_output(const T& expected, const T& actual, const path_cons_list& path) {
+   try {
+      HOTC_ASSERT((expected == actual), block_tx_output_exception, 
+         "expected: ${expected}, actual: ${actual}", ("expected", expected)("actual", actual));
+   } FC_RETHROW_EXCEPTIONS(warn, "at: ${path}", ("path", resolve_path_string(path)));
+}
+
+template<typename T>
+void check_output(const vector<T>& expected, const vector<T>& actual, const path_cons_list& path) {
+   check_output(expected.size(), actual.size(), path(".size()"));
+   for(int idx=0; idx < expected.size(); idx++) {
+      const auto &expected_element = expected.at(idx);
+      const auto &actual_element = actual.at(idx);
+      check_output(expected_element, actual_element, path(idx));
+   }
+}
+
+template<typename T>
+void check_output(const fc::optional<T>& expected, const fc::optional<T>& actual, const path_cons_list& path) {
+   check_output(expected.valid(), actual.valid(), path(".valid()"));
+   if (expected.valid()) {
+      check_output(*expected, *actual, path);
+   }
+}
+
+template<>
+void check_output(const types::Bytes& expected, const types::Bytes& actual, const path_cons_list& path) {
+  check_output(expected.size(), actual.size(), path(".size()"));
+  
+  auto cmp_result = std::memcmp(expected.data(), actual.data(), expected.size());
+  check_output(cmp_result, 0, path("@memcmp()"));
+}
+
+template<>
+void check_output(const types::AccountPermission& expected, const types::AccountPermission& actual, const path_cons_list& path) {
+   check_output(expected.account, actual.account, path(".account"));
+   check_output(expected.permission, actual.permission, path(".permission"));
+}
+
+template<>
+void check_output(const types::Message& expected, const types::Message& actual, const path_cons_list& path) {
+   check_output(expected.code, actual.code, path(".code"));
+   check_output(expected.type, actual.type, path(".type"));
+   check_output(expected.authorization, actual.authorization, path(".authorization"));
+   check_output(expected.data, actual.data, path(".data"));
+}
+
+template<>
+void check_output(const MessageOutput& expected, const MessageOutput& actual, const path_cons_list& path);
+
+template<>
+void check_output(const NotifyOutput& expected, const NotifyOutput& actual, const path_cons_list& path) {
+   check_output(expected.name, actual.name, path(".name"));
+   check_output(expected.output, actual.output, path(".output"));
+}
+
+template<>
+void check_output(const Transaction& expected, const Transaction& actual, const path_cons_list& path) {
+   check_output(expected.refBlockNum, actual.refBlockNum, path(".refBlockNum"));
+   check_output(expected.refBlockPrefix, actual.refBlockPrefix, path(".refBlockPrefix"));
+   check_output(expected.expiration, actual.expiration, path(".expiration"));
+   check_output(expected.scope, actual.scope, path(".scope"));
+   check_output(expected.messages, actual.messages, path(".messages"));
+}
+
+
+template<>
+void check_output(const InlineTransaction& expected, const InlineTransaction& actual, const path_cons_list& path) {
+   check_output<Transaction>(expected, actual, path);
+   check_output(expected.output, actual.output, path(".output"));
+}
+
+template<>
+void check_output(const GeneratedTransaction& expected, const GeneratedTransaction& actual, const path_cons_list& path) {
+   check_output(expected.id, actual.id, path(".id"));
+   check_output<Transaction>(expected, actual, path);
+}
+
+template<>
+void check_output(const MessageOutput& expected, const MessageOutput& actual, const path_cons_list& path) {
+   check_output(expected.notify, actual.notify, path(".notify"));
+   check_output(expected.inline_transaction, actual.inline_transaction, path(".inline_transaction"));
+   check_output(expected.deferred_transactions, actual.deferred_transactions, path(".deferred_transactions"));
+}
+
+template<typename T>
+void chain_controller::check_transaction_output(const T& expected, const T& actual, const path_cons_list& path)const {
+   if (!(_skip_flags & skip_output_check)) {
+      check_output(expected.output, actual.output, path(".output"));
+   }
 }
 
 void chain_controller::_apply_block(const signed_block& next_block)
@@ -445,7 +674,9 @@ void chain_controller::_apply_block(const signed_block& next_block)
       for (const auto& thread : cycle)
          for (const auto& trx : thread.user_input) {
             validate_referenced_accounts(trx);
-            check_transaction_authorization(trx);
+            // Check authorization, and allow irrelevant signatures.
+            // If the block producer let it slide, we'll roll with it.
+            check_transaction_authorization(trx, true);
          }
 
    /* We do not need to push the undo state for each transaction
@@ -454,13 +685,29 @@ void chain_controller::_apply_block(const signed_block& next_block)
     * for transactions when validating broadcast transactions or
     * when building a block.
     */
-   for (const auto& cycle : next_block.cycles) {
-      for (const auto& thread : cycle) {
-         for(const auto& trx : thread.generated_input ) {
-#warning TODO: Process generated transaction
+   auto root_path = path_cons_list("next_block.cycles");
+   for (int c_idx = 0; c_idx < next_block.cycles.size(); c_idx++) {
+      const auto& cycle = next_block.cycles.at(c_idx);
+      auto c_path = path_cons_list(c_idx, root_path);
+
+      for (int t_idx = 0; t_idx < cycle.size(); t_idx++) {
+         const auto& thread = cycle.at(t_idx);
+         auto t_path = path_cons_list(t_idx, c_path);
+
+         auto gen_path = path_cons_list(".generated_input", t_path);
+         for(int p_idx = 0; p_idx < thread.generated_input.size(); p_idx++ ) {
+            const auto& ptrx = thread.generated_input.at(p_idx);
+            const auto& trx = get_generated_transaction(ptrx.id);
+            auto processed = apply_transaction(trx);
+            check_transaction_output(ptrx, processed, gen_path(p_idx));
          }
-         for(const auto& trx : thread.user_input ) {
-            apply_transaction(trx);
+
+         auto user_path = path_cons_list(".user_input", t_path);
+         for(int p_idx = 0; p_idx < thread.user_input.size(); p_idx++ ) {
+            const auto& ptrx = thread.user_input.at(p_idx);
+            const SignedTransaction& trx = ptrx;
+            auto processed = apply_transaction(trx);
+            check_transaction_output(ptrx, processed, user_path(p_idx));
          }
       }
    }
@@ -479,23 +726,51 @@ void chain_controller::_apply_block(const signed_block& next_block)
 
 } FC_CAPTURE_AND_RETHROW( (next_block.block_num()) )  }
 
-void chain_controller::check_transaction_authorization(const SignedTransaction& trx)const {
+namespace {
+
+  auto make_get_permission(const chainbase::database& db) {
+     return [&db](const types::AccountPermission& permission) {
+        auto key = boost::make_tuple(permission.account, permission.permission);
+        return db.get<permission_object, by_owner>(key);
+     };
+  }
+
+  auto make_authority_checker(const chainbase::database& db, const flat_set<public_key_type>& signingKeys) {
+     auto getPermission = make_get_permission(db);
+     auto getAuthority = [getPermission](const types::AccountPermission& permission) {
+        return getPermission(permission).auth;
+     };
+     auto depthLimit = db.get<global_property_object>().configuration.authDepthLimit;
+     return MakeAuthorityChecker(std::move(getAuthority), depthLimit, signingKeys);
+  }
+
+}
+
+flat_set<public_key_type> chain_controller::get_required_keys(const SignedTransaction& trx, const flat_set<public_key_type>& candidateKeys)const {
+   auto checker = make_authority_checker(_db, candidateKeys);
+
+   for (const auto& message : trx.messages) {
+      for (const auto& declaredAuthority : message.authorization) {
+         if (!checker.satisfied(declaredAuthority)) {
+            HOTC_ASSERT(checker.satisfied(declaredAuthority), tx_missing_sigs,
+                       "Transaction declares authority '${auth}', but does not have signatures for it.",
+                       ("auth", declaredAuthority));
+         }
+      }
+   }
+
+   return checker.used_keys();
+}
+
+void chain_controller::check_transaction_authorization(const SignedTransaction& trx, bool allow_unused_signatures)const {
    if ((_skip_flags & skip_transaction_signatures) && (_skip_flags & skip_authority_check)) {
-      ilog("Skipping auth and sigs checks");
+      //ilog("Skipping auth and sigs checks");
       return;
    }
 
-
-   auto getPermission = [&db=_db](const types::AccountPermission& permission) {
-      auto key = boost::make_tuple(permission.account, permission.permission);
-      return db.get<permission_object, by_owner>(key);
-   };
-   auto getAuthority = [&getPermission](const types::AccountPermission& permission) {
-      return getPermission(permission).auth;
-   };
-   auto depthLimit = get_global_properties().configuration.authDepthLimit;
+   auto getPermission = make_get_permission(_db);
 #warning TODO: Use a real chain_id here (where is this stored? Do we still need it?)
-   auto checker = MakeAuthorityChecker(std::move(getAuthority), depthLimit, trx.get_signature_keys(chain_id_type{}));
+   auto checker = make_authority_checker(_db, trx.get_signature_keys(chain_id_type{}));
 
    for (const auto& message : trx.messages)
       for (const auto& declaredAuthority : message.authorization) {
@@ -504,7 +779,8 @@ void chain_controller::check_transaction_authorization(const SignedTransaction& 
          if ((_skip_flags & skip_authority_check) == false) {
             const auto& index = _db.get_index<permission_index>().indices();
             HOTC_ASSERT(getPermission(declaredAuthority).satisfies(minimumPermission, index), tx_irrelevant_auth,
-                       "Message declares irrelevant authority '${auth}'", ("auth", declaredAuthority));
+                       "Message declares irrelevant authority '${auth}'; minimum authority is ${min}",
+                       ("auth", declaredAuthority)("min", minimumPermission.name));
          }
          if ((_skip_flags & skip_transaction_signatures) == false) {
             HOTC_ASSERT(checker.satisfied(declaredAuthority), tx_missing_sigs,
@@ -513,30 +789,23 @@ void chain_controller::check_transaction_authorization(const SignedTransaction& 
          }
       }
 
-   HOTC_ASSERT(checker.all_keys_used(), tx_irrelevant_sig,
-              "Transaction bears irrelevant signatures from these keys: ${keys}", ("keys", checker.unused_keys()));
+   if (!allow_unused_signatures && (_skip_flags & skip_transaction_signatures) == false)
+      HOTC_ASSERT(checker.all_keys_used(), tx_irrelevant_sig,
+                 "Transaction bears irrelevant signatures from these keys: ${keys}", ("keys", checker.unused_keys()));
 }
 
-ProcessedTransaction chain_controller::apply_transaction(const SignedTransaction& trx, uint32_t skip)
-{
-   return with_skip_flags( skip, [&]() { return _apply_transaction(trx); });
-}
-
-void chain_controller::validate_transaction(const SignedTransaction& trx)const {
-try {
-   HOTC_ASSERT(trx.messages.size() > 0, transaction_exception, "A transaction must have at least one message");
-
-   validate_scope(trx);
-   validate_expiration(trx);
-   validate_uniqueness(trx);
-   validate_tapos(trx);
-
-} FC_CAPTURE_AND_RETHROW( (trx) ) }
-
-void chain_controller::validate_scope( const SignedTransaction& trx )const {
-   HOTC_ASSERT(trx.scope.size() > 0, transaction_exception, "No scope specified by transaction" );
+void chain_controller::validate_scope( const Transaction& trx )const {
+   HOTC_ASSERT(trx.scope.size() + trx.readscope.size() > 0, transaction_exception, "No scope specified by transaction" );
    for( uint32_t i = 1; i < trx.scope.size(); ++i )
       HOTC_ASSERT( trx.scope[i-1] < trx.scope[i], transaction_exception, "Scopes must be sorted and unique" );
+   for( uint32_t i = 1; i < trx.readscope.size(); ++i )
+      HOTC_ASSERT( trx.readscope[i-1] < trx.readscope[i], transaction_exception, "Scopes must be sorted and unique" );
+
+   vector<types::AccountName> intersection;
+   std::set_intersection( trx.scope.begin(), trx.scope.end(),
+                          trx.readscope.begin(), trx.readscope.end(),
+                          std::back_inserter(intersection) );
+   FC_ASSERT( intersection.size() == 0, "a transaction may not redeclare scope in readscope" );
 }
 
 const permission_object& chain_controller::lookup_minimum_permission(types::AccountName authorizer_account,
@@ -567,18 +836,38 @@ void chain_controller::validate_uniqueness( const SignedTransaction& trx )const 
    HOTC_ASSERT(transaction == nullptr, tx_duplicate, "Transaction is not unique");
 }
 
-void chain_controller::validate_tapos(const SignedTransaction& trx)const {
+void chain_controller::validate_uniqueness( const GeneratedTransaction& trx )const {
+   if( !should_check_for_duplicate_transactions() ) return;
+}
+
+void chain_controller::record_transaction(const SignedTransaction& trx) {
+   //Insert transaction into unique transactions database.
+    _db.create<transaction_object>([&](transaction_object& transaction) {
+        transaction.trx_id = trx.id(); /// TODO: consider caching ID
+        transaction.trx = trx;
+    });
+}
+
+void chain_controller::record_transaction(const GeneratedTransaction& trx) {
+   _db.modify( _db.get<generated_transaction_object,generated_transaction_object::by_trx_id>(trx.id), [&](generated_transaction_object& transaction) {
+      transaction.status = generated_transaction_object::PROCESSED;
+   });
+}     
+
+
+
+void chain_controller::validate_tapos(const Transaction& trx)const {
    if (!should_check_tapos()) return;
 
    const auto& tapos_block_summary = _db.get<block_summary_object>((uint16_t)trx.refBlockNum);
 
    //Verify TaPoS block summary has correct ID prefix, and that this block's time is not past the expiration
-   HOTC_ASSERT(trx.verify_reference_block(tapos_block_summary.block_id), transaction_exception,
+   HOTC_ASSERT(transaction_verify_reference_block(trx, tapos_block_summary.block_id), transaction_exception,
               "Transaction's reference block did not match. Is this transaction from a different fork?",
               ("tapos_summary", tapos_block_summary));
 }
 
-void chain_controller::validate_referenced_accounts(const SignedTransaction& trx)const {
+void chain_controller::validate_referenced_accounts(const Transaction& trx)const {
    for (const auto& scope : trx.scope)
       require_account(scope);
    for (const auto& msg : trx.messages) {
@@ -588,7 +877,7 @@ void chain_controller::validate_referenced_accounts(const SignedTransaction& trx
    }
 }
 
-void chain_controller::validate_expiration(const SignedTransaction& trx) const
+void chain_controller::validate_expiration(const Transaction& trx) const
 { try {
    fc::time_point_sec now = head_block_time();
    const BlockchainConfiguration& chain_configuration = get_global_properties().configuration;
@@ -602,35 +891,10 @@ void chain_controller::validate_expiration(const SignedTransaction& trx) const
 } FC_CAPTURE_AND_RETHROW((trx)) }
 
 
-/**
- *  When processing a message it needs to run:
- *
- *  code::precondition( message.code, message.apply )
- *  code::apply( message.code, message.apply )
- *
- *  Then for each recipient it needs to run 
- *
- *  ````
- *   recipient::precondition( message.code, message.apply )
- *   recipient::apply( message.code, message.apply )
- *  ```
- *
- *  The data that can be read is anything declared in trx.scope
- *  The data that can be written is anything stored in  * / [code | recipient] / *
- *
- *  The order of execution of precondition and apply can impact the validity of the
- *  entire message.
- */
-void chain_controller::process_message(const ProcessedTransaction& trx, AccountName code,
-                                       const Message& message, MessageOutput& output) {
+void chain_controller::process_message(const Transaction& trx, AccountName code,
+                                       const Message& message, MessageOutput& output, apply_context* parent_context) {
    apply_context apply_ctx(*this, _db, trx, message, code);
    apply_message(apply_ctx);
-
-   // process_message recurses for each notified account, but we only want to run this check at the top level
-   if (code == message.code && (_skip_flags & skip_authority_check) == false)
-      HOTC_ASSERT(apply_ctx.all_authorizations_used(), tx_irrelevant_auth,
-                 "Message declared authorities it did not need: ${unused}",
-                 ("unused", apply_ctx.unused_authorizations())("message", message));
 
    output.notify.reserve( apply_ctx.notified.size() );
 
@@ -638,19 +902,42 @@ void chain_controller::process_message(const ProcessedTransaction& trx, AccountN
       try {
          auto notify_code = apply_ctx.notified[i];
          output.notify.push_back( {notify_code} );
-         process_message( trx, notify_code, message, output.notify.back().output );
+         process_message(trx, notify_code, message, output.notify.back().output, &apply_ctx);
       } FC_CAPTURE_AND_RETHROW((apply_ctx.notified[i]))
    }
 
-   for( const auto& generated : apply_ctx.sync_transactions ) {
-      try {
-         output.sync_transactions.emplace_back( process_transaction( generated ) );
-      } FC_CAPTURE_AND_RETHROW((generated))
+   // combine inline messages and process
+   if (apply_ctx.inline_messages.size() > 0) {
+      output.inline_transaction = InlineTransaction(trx);
+      (*output.inline_transaction).messages = std::move(apply_ctx.inline_messages);
    }
 
-   for( auto& asynctrx : apply_ctx.async_transactions ) {
-        output.async_transactions.emplace_back( std::move( asynctrx ) );
+   for( auto& asynctrx : apply_ctx.deferred_transactions ) {
+      digest_type::encoder enc;
+      fc::raw::pack( enc, trx );
+      fc::raw::pack( enc, asynctrx );
+      auto id = enc.result();
+      auto gtrx = GeneratedTransaction(id, asynctrx);
+
+      _db.create<generated_transaction_object>([&](generated_transaction_object& transaction) {
+         transaction.trx = gtrx;
+         transaction.status = generated_transaction_object::PENDING;
+      });
+
+      output.deferred_transactions.emplace_back( gtrx );
    }
+
+   // propagate used_authorizations up the context chain
+   if (parent_context != nullptr)
+      for (int i = 0; i < apply_ctx.used_authorizations.size(); ++i)
+         if (apply_ctx.used_authorizations[i])
+            parent_context->used_authorizations[i] = true;
+
+   // process_message recurses for each notified account, but we only want to run this check at the top level
+   if (parent_context == nullptr && (_skip_flags & skip_authority_check) == false)
+      HOTC_ASSERT(apply_ctx.all_authorizations_used(), tx_irrelevant_auth,
+                 "Message declared authorities it did not need: ${unused}",
+                 ("unused", apply_ctx.unused_authorizations())("message", message));
 }
 
 void chain_controller::apply_message(apply_context& context)
@@ -674,39 +961,41 @@ void chain_controller::apply_message(apply_context& context)
 
 } FC_CAPTURE_AND_RETHROW((context.msg)) }
 
-ProcessedTransaction chain_controller::_apply_transaction(const SignedTransaction& trx)
+template<typename T>
+typename T::Processed chain_controller::apply_transaction(const T& trx)
 { try {
    validate_transaction(trx);
-
-   //Insert transaction into unique transactions database.
-   if (should_check_for_duplicate_transactions())
-   {
-      _db.create<transaction_object>([&](transaction_object& transaction) {
-         transaction.trx_id = trx.id(); /// TODO: consider caching ID
-         transaction.trx = trx;
-      });
-   }
-
-   return process_transaction( trx );
+   record_transaction(trx);
+   return process_transaction( trx, 0, fc::time_point::now());
 
 } FC_CAPTURE_AND_RETHROW((trx)) }
-
 
 /**
  *  @pre the transaction is assumed valid and all signatures / duplicate checks have bee performed
  */
-ProcessedTransaction chain_controller::process_transaction( const SignedTransaction& trx ) 
+template<typename T>
+typename T::Processed chain_controller::process_transaction( const T& trx, int depth, const fc::time_point& start_time ) 
 { try {
-   ProcessedTransaction ptrx( trx );
+   const BlockchainConfiguration& chain_configuration = get_global_properties().configuration;
+   HOTC_ASSERT((fc::time_point::now() - start_time).count() < chain_configuration.maxTrxRuntime, checktime_exceeded,
+      "Transaction exceeded maximum total transaction time of ${limit}ms", ("limit", chain_configuration.maxTrxRuntime));
+
+   HOTC_ASSERT(depth < chain_configuration.inlineDepthLimit, tx_resource_exhausted,
+      "Transaction exceeded maximum inline recursion depth of ${limit}", ("limit", chain_configuration.inlineDepthLimit));
+
+   typename T::Processed ptrx( trx );
    ptrx.output.resize( trx.messages.size() );
 
-   for( uint32_t i = 0; i < ptrx.messages.size(); ++i ) {
-      process_message(ptrx, ptrx.messages[i].code, ptrx.messages[i], ptrx.output[i] );
+   for( uint32_t i = 0; i < trx.messages.size(); ++i ) {
+      auto& output = ptrx.output[i];
+      process_message(trx, trx.messages[i].code, trx.messages[i], output);
+      if (output.inline_transaction.valid() ) {
+         output.inline_transaction = process_transaction(PendingInlineTransaction(*output.inline_transaction), depth + 1, start_time);
+      }
    }
 
    return ptrx;
 } FC_CAPTURE_AND_RETHROW( (trx) ) }
-
 
 void chain_controller::require_account(const types::AccountName& name) const {
    auto account = _db.find<account_object, by_name>(name);
@@ -806,6 +1095,9 @@ block_id_type chain_controller::head_block_id()const {
 }
 
 types::AccountName chain_controller::head_block_producer() const {
+   auto b = _fork_db.fetch_block(head_block_id());
+   if( b ) return b->data.producer;
+
    if (auto head_block = fetch_block_by_id(head_block_id()))
       return head_block->producer;
    return {};
@@ -826,11 +1118,13 @@ void chain_controller::initialize_indexes() {
    _db.add_index<action_permission_index>();
    _db.add_index<key_value_index>();
    _db.add_index<key128x128_value_index>();
+   _db.add_index<key64x64x64_value_index>();
 
    _db.add_index<global_property_multi_index>();
    _db.add_index<dynamic_global_property_multi_index>();
    _db.add_index<block_summary_multi_index>();
    _db.add_index<transaction_multi_index>();
+   _db.add_index<generated_transaction_multi_index>();
    _db.add_index<producer_multi_index>();
 }
 
@@ -876,7 +1170,12 @@ chain_controller::chain_controller(database& database, fork_database& fork_db, b
 
    initialize_indexes();
    starter.register_types(*this, _db);
-   initialize_chain(starter);
+
+   // Behave as though we are applying a block during chain initialization (it's the genesis block!)
+   with_applying_block([&] {
+      initialize_chain(starter);
+   });
+
    spinup_db();
    spinup_fork_db();
 
@@ -901,7 +1200,7 @@ void chain_controller::replay() {
 
    const auto last_block_num = last_block->block_num();
 
-   ilog("Replaying blocks...");
+   ilog("Replaying ${n} blocks...", ("n", last_block_num) );
    for (uint32_t i = 1; i <= last_block_num; ++i) {
       if (i % 5000 == 0)
          std::cerr << "   " << double(i*100)/last_block_num << "%   "<<i << " of " <<last_block_num<<"   \n";
@@ -1067,6 +1366,13 @@ void chain_controller::clear_expired_transactions()
    const auto& dedupe_index = transaction_idx.indices().get<by_expiration>();
    while( (!dedupe_index.empty()) && (head_block_time() > dedupe_index.rbegin()->trx.expiration) )
       transaction_idx.remove(*dedupe_index.rbegin());
+
+   //Look for expired transactions in the pending generated list, and remove them.
+   //Transactions must have expired by at least two forking windows in order to be removed.
+   auto& generated_transaction_idx = _db.get_mutable_index<generated_transaction_multi_index>();
+   const auto& generated_index = generated_transaction_idx.indices().get<generated_transaction_object::by_expiration>();
+   while( (!generated_index.empty()) && (head_block_time() > generated_index.rbegin()->trx.expiration) )
+      generated_transaction_idx.remove(*generated_index.rbegin());
 } FC_CAPTURE_AND_RETHROW() }
 
 using boost::container::flat_set;
