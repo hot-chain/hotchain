@@ -1,13 +1,11 @@
-[submodule "libraries/fc"]
-    path = libraries/fc
-    url = https://github.com/bitshares/bitshares-fc.git
-    ignore = dirty
 [submodule "libraries/chainbase"]
 	path = libraries/chainbase
-	url = https://github.com/bytemaster/chainbase
-[submodule "libraries/wren"]
-	path = libraries/wren
-	url = https://github.com/bytemaster/wren.git
+	url = https://github.com/hotcio/chainbase
+        ignore = dirty
 [submodule "libraries/appbase"]
 	path = libraries/appbase
-	url = https://github.com/bytemaster/appbase
+	url = https://github.com/hotcio/appbase
+        ignore = dirty
+[submodule "programs/snapshot"]
+	path = programs/snapshot
+	url = https://github.com/HOTCIO/genesis.git
