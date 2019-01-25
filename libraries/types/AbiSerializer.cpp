@@ -55,10 +55,10 @@ namespace hotc { namespace types {
       built_in_types.emplace("FixedString16", packUnpack<FixedString16>());
       built_in_types.emplace("TypeName",      packUnpack<TypeName>());
       built_in_types.emplace("Bytes",         packUnpack<Bytes>());
-      built_in_types.emplace("UInt8",         packUnpack<uint8_t>());
-      built_in_types.emplace("UInt16",        packUnpack<uint16_t>());
-      built_in_types.emplace("UInt32",        packUnpack<uint32_t>());
-      built_in_types.emplace("UInt64",        packUnpack<uint64_t>());
+      built_in_types.emplace("UInt8",         packUnpack<UInt8>());
+      built_in_types.emplace("UInt16",        packUnpack<UInt16>());
+      built_in_types.emplace("UInt32",        packUnpack<UInt32>());
+      built_in_types.emplace("UInt64",        packUnpack<UInt64>());
       built_in_types.emplace("UInt128",       packUnpack<UInt128>());
       built_in_types.emplace("UInt256",       packUnpack<UInt256>());
       built_in_types.emplace("Int8",          packUnpack<int8_t>());
@@ -91,18 +91,6 @@ namespace hotc { namespace types {
       built_in_types.emplace("Action",                  packUnpack<Action>());
       built_in_types.emplace("Table",                   packUnpack<Table>());
       built_in_types.emplace("Abi",                     packUnpack<Abi>());
-      built_in_types.emplace("transfer",                packUnpack<transfer>());
-      built_in_types.emplace("lock",                    packUnpack<lock>());
-      built_in_types.emplace("unlock",                  packUnpack<unlock>());
-      built_in_types.emplace("claim",                   packUnpack<claim>());
-      built_in_types.emplace("newaccount",              packUnpack<newaccount>());
-      built_in_types.emplace("setcode",                 packUnpack<setcode>());
-      built_in_types.emplace("setproducer",             packUnpack<setproducer>());
-      built_in_types.emplace("okproducer",              packUnpack<okproducer>());
-      built_in_types.emplace("setproxy",                packUnpack<setproxy>());
-      built_in_types.emplace("UpdatePermission",        packUnpack<UpdatePermission>());
-      built_in_types.emplace("DeletePermission",        packUnpack<DeletePermission>());
-      
    }
 
    void AbiSerializer::setAbi( const Abi& abi ) {
@@ -112,7 +100,10 @@ namespace hotc { namespace types {
       tables.clear();
 
       for( const auto& td : abi.types )
+      {
+         FC_ASSERT( isType(td.type), "invalid type", ("type",td.type));
          typedefs[td.newTypeName] = td.type;
+      }
 
       for( const auto& st : abi.structs )
          structs[st.name] = st;
@@ -238,7 +229,7 @@ namespace hotc { namespace types {
       }
    }
 
-   Bytes AbiSerializer::variantToBinary(const TypeName& type, const fc::variant& var) const {
+   Bytes AbiSerializer::variantToBinary(const TypeName& type, const fc::variant& var)const {
       if( !isType(type) ) {
          return var.as<Bytes>();
       }
@@ -250,12 +241,12 @@ namespace hotc { namespace types {
       return temp;
    }
 
-   TypeName AbiSerializer::getActionType( Name action ) const {
+   TypeName AbiSerializer::getActionType( Name action )const {
       auto itr = actions.find(action);
       if( itr != actions.end() ) return itr->second;
       return TypeName();
    }
-   TypeName AbiSerializer::getTableType( Name action ) const {
+   TypeName AbiSerializer::getTableType( Name action )const {
       auto itr = tables.find(action);
       if( itr != tables.end() ) return itr->second;
       return TypeName();
