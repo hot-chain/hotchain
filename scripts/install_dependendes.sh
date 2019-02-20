@@ -15,9 +15,9 @@ if [ $ARCH == "ubuntu" ]; then
     # install boost
     cd ${TEMP_DIR}
     wget -c 'https://sourceforge.net/projects/boost/files/boost/1.64.0/boost_1_64_0.tar.bz2/download' -O boost_1.64.0.tar.bz2
-    tar xjf boost_1.64.0.tar.bz2
+    tar cvf boost_1.64.0.tar.bz2 usr/
     cd boost_1_64_0/
-    BOOST_ROOT=usr/
+    BOOST_ROOT=/usr
     ./bootstrap.sh "--prefix=$BOOST_ROOT"
     ./b2 install
     rm -rf ${TEMP_DIR}/boost_1_64_0/
@@ -30,20 +30,18 @@ if [ $ARCH == "ubuntu" ]; then
     ./configure
     make
     sudo make install
-    ldconfig
     rm -rf cd ${TEMP_DIR}/secp256k1-zkp
 
     # install binaryen
     cd ${TEMP_DIR}
-    git clone https://github.com/WebAssembly/binaryen/archive/1.37.21.tar.gz
-    tar zxf 1.37.21.tar.gz
-    cd binaryen-1.37.21
+    git clone https://github.com/WebAssembly/binaryen
+    cd binaryen
     git checkout tags/1.37.14
     cmake . && make
     mkdir /opt/binaryen
-    mv ${TEMP_DIR}/binaryen-1.37.21/bin /opt/binaryen
+    mv ${TEMP_DIR}/binaryen/bin /opt/binaryen
     ln -s /opt/binaryen/bin/* /usr/local
-    rm -rf ${TEMP_DIR}/binaryen-1.37.21
+    rm -rf ${TEMP_DIR}/binaryen
     BINARYEN_BIN=/opt/binaryen/bin/
 
     # build llvm with wasm build target:
@@ -63,10 +61,7 @@ if [ $ARCH == "ubuntu" ]; then
 fi
 
 if [ $ARCH == "darwin" ]; then
-    # update xcode:
-    xcode-select --install
-
-    DEPS="git automake libtool boost openssl llvm gmp"
+    DEPS="git automake libtool boost openssl llvm@4 gmp wget"
     brew update
     brew install --force $DEPS
     brew unlink $DEPS && brew link --force $DEPS
@@ -80,21 +75,19 @@ if [ $ARCH == "darwin" ]; then
     ./configure
     make
     sudo make install
-    ldconfig
     rm -rf cd ${TEMP_DIR}/secp256k1-zkp
 
     # Install binaryen v1.37.14:
     cd ${TEMP_DIR}
-    git clone https://github.com/WebAssembly/binaryen/archive/1.37.21.tar.gz
-    tar zxf 1.37.21.tar.gz
-    cd binaryen-1.37.21
+    git clone https://github.com/WebAssembly/binaryen
+    cd binaryen
     git checkout tags/1.37.14
     cmake . && make
-    mkdir /opt/binaryen
-    mv ${TEMP_DIR}/binaryen-1.37.21/bin /opt/binaryen
-    ln -s /opt/binaryen/bin/* /usr/local
-    rm -rf ${TEMP_DIR}/binaryen-1.37.21
-    BINARYEN_BIN=/opt/binaryen/bin/
+    mkdir /usr/local/binaryen
+    mv ${TEMP_DIR}/binaryen/bin /usr/local/binaryen
+    ln -s /usr/local/binaryen/bin/* /usr/local
+    rm -rf ${TEMP_DIR}/binaryen
+    BINARYEN_BIN=/usr/local/binaryen/bin/
 
     # Build LLVM and clang for WASM:
     cd ${TEMP_DIR}
@@ -106,9 +99,9 @@ if [ $ARCH == "darwin" ]; then
     cd ..
     mkdir build
     cd build
-    cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX=/opt/wasm -DLLVM_TARGETS_TO_BUILD= -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=WebAssembly -DCMAKE_BUILD_TYPE=Release ../
+    cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX=/usr/local/wasm -DLLVM_TARGETS_TO_BUILD= -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=WebAssembly -DCMAKE_BUILD_TYPE=Release ../
     make -j4 install
     rm -rf ${TEMP_DIR}/wasm-compiler
-    WASM_LLVM_CONFIG=/opt/wasm/bin/llvm-config
+    WASM_LLVM_CONFIG=/usr/local/wasm/bin/llvm-config
 
 fi
