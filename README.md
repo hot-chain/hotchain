@@ -1,12 +1,50 @@
-﻿# Hotc
+﻿# HOTC.IO - The Most Powerful Infrastructure for Decentralized Applications
 
 [![Build Status](https://travis-ci.org/HOTCIO/hotc.svg?branch=master)](https://travis-ci.org/HOTCIO/hotc)
 
-Welcome to the HOTC.IO source code repository!
+Welcome to the HOTC.IO source code repository!  HOTC.IO software enables developers to create and deploy
+high-performance, horizontally scalable, blockchain infrastructure upon which decentralized applications
+can be built. 
 
+This code is currently alpha-quality and under rapid development. That said,
+there is plenty early experimenters can do including, running a private multi-node test network and
+develop applications (smart contracts).  
+
+# Resources
+1. [HOTC.IO Website](https://hotc.io)
+2. [Blog](https://steemit.com/@hotcio)
+2. [Roadmap](https://github.com/HOTCIO/Documentation/blob/master/Roadmap.md)
+3. [Telegram](https://hotc.io/chat)
+4. [Documentation](https://hotcio.github.io/hotc/)
+5. [White Paper](https://github.com/HOTCIO/Documentation/blob/master/TechnicalWhitePaper.md)
+
+# Table of contents
+
+1. [Getting Started](#gettingstarted)
+2. [Setting up a build/development environment](#setup)
+	1. [Clean install Ubuntu 16.10](#ubuntu)
+	2. [macOS Sierra 10.12.6](#macos)
+3. [Building HOTC and running a node](#runanode)
+	1. [Getting the code](#getcode)
+	2. [Building from source code](#build)
+	3. [Creating and launching a single-node testnet](#singlenode)
+4. [Accounts and smart contracts](#accountssmartcontracts)
+	1. [Example smart contracts](#smartcontractexample)
+	2. [Setting up a wallet and importing account key](#walletimport)
+	3. [Creating accounts for your smart contracts](#createaccounts)
+	4. [Upload sample contract to blockchain](#uploadsmartcontract)
+	5. [Pushing a message to a sample contract](#pushamessage)
+	6. [Reading Currency Contract Balance](#readingcontract)
+5. [Running local testnet](#localtestnet)
+6. [Doxygen documentation](#doxygen)
+7. [Running HOTC in Docker](#docker)
+	1. [Running contract in docker example](#dockercontract)
+
+<a name="gettingstarted"></a>
 ## Getting Started
 The following instructions overview the process of getting the software, building it, running a simple test network that produces blocks, account creation and uploading a sample contract to the blockchain.
 
+<a name="setup"></a>
 ## Setting up a build/development environment
 This project is written primarily in C++14 and uses CMake as its build system. An up-to-date Clang and the latest version of CMake is recommended.
 
@@ -20,11 +58,12 @@ Dependencies:
 * [secp256k1-zkp (Cryptonomex branch)](https://github.com/cryptonomex/secp256k1-zkp.git)
 * [binaryen](https://github.com/WebAssembly/binaryen.git)
 
-### Clean install Ubuntu 16.10
+<a name="ubuntu"></a>
+### Clean install Ubuntu 16.10 
 
 Install the development toolkit:
 
-```commandline
+```bash
 sudo apt-get update
 wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
 sudo apt-get install clang-4.0 lldb-4.0 cmake make \
@@ -36,7 +75,7 @@ sudo apt-get install clang-4.0 lldb-4.0 cmake make \
 
 Install Boost 1.64:
 
-```commandline
+```bash
 cd ~
 wget -c 'https://sourceforge.net/projects/boost/files/boost/1.64.0/boost_1_64_0.tar.bz2/download' -O boost_1.64.0.tar.bz2
 tar xjf boost_1.64.0.tar.bz2
@@ -50,7 +89,7 @@ source ~/.bash_profile
 
 Install [secp256k1-zkp (Cryptonomex branch)](https://github.com/cryptonomex/secp256k1-zkp.git):
         
-```commandline
+```bash
 cd ~
 git clone https://github.com/cryptonomex/secp256k1-zkp.git
 cd secp256k1-zkp
@@ -60,9 +99,9 @@ make
 sudo make install
 ```
 
-Also, to use the WASM compiler, hotc has an external dependency on [binaryen](https://github.com/WebAssembly/binaryen.git):
+To use the WASM compiler, HOTC has an external dependency on [binaryen](https://github.com/WebAssembly/binaryen.git):
 
-```commandline
+```bash
 cd ~
 git clone https://github.com/WebAssembly/binaryen.git
 cd ~/binaryen
@@ -71,16 +110,16 @@ cmake . && make
 
 ```
 
-Add BINARYEN_ROOT to your .bash_profile:
+Add `BINARYEN_ROOT` to your .bash_profile:
 
-```commandline
+```bash
 echo "export BINARYEN_ROOT=~/binaryen" >> ~/.bash_profile
 source ~/.bash_profile
 ```
 
 By default LLVM and clang do not include the WASM build target, so you will have to build it yourself:
 
-```commandline
+```bash
 mkdir  ~/wasm-compiler
 cd ~/wasm-compiler
 git clone --depth 1 --single-branch --branch release_40 https://github.com/llvm-mirror/llvm.git
@@ -93,7 +132,10 @@ cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX=.. -DLLVM_TARGETS_TO_BUILD= -DL
 make -j4 install
 ```
 
-### macOS Sierra 10.12.6
+Your environment is set up. Now you can <a href="#runanode">build HOTC and run a node</a>. 
+
+<a name="macos"></a>
+### macOS Sierra 10.12.6 
 
 macOS additional Dependencies:
 
@@ -102,26 +144,26 @@ macOS additional Dependencies:
 
 Upgrade your XCode to the newest version:
 
-```commandline
+```bash
 xcode-select --install
 ```
 
 Install homebrew:
 
-```commandline
+```bash
 ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
 ```
 
 Install the dependencies:
 
-```commandline
+```bash
 brew update
 brew install git automake libtool boost openssl llvm gmp
 ```
 
 Install [secp256k1-zkp (Cryptonomex branch)](https://github.com/cryptonomex/secp256k1-zkp.git):
         
-```commandline
+```bash
 cd ~
 git clone https://github.com/cryptonomex/secp256k1-zkp.git
 cd secp256k1-zkp
@@ -133,7 +175,7 @@ sudo make install
 
 Install [binaryen v1.37.14](https://github.com/WebAssembly/binaryen.git):
 
-```commandline
+```bash
 cd ~
 git clone https://github.com/WebAssembly/binaryen.git
 cd ~/binaryen
@@ -141,9 +183,9 @@ git checkout tags/1.37.14
 cmake . && make
 ```
 
-Add BINARYEN_ROOT to your .bash_profile:
+Add `BINARYEN_ROOT` to your .bash_profile:
 
-```commandline
+```bash
 echo "export BINARYEN_ROOT=~/binaryen" >> ~/.bash_profile
 source ~/.bash_profile
 ```
@@ -151,7 +193,7 @@ source ~/.bash_profile
 
 Build LLVM and clang for WASM:
 
-```commandline
+```bash
 mkdir  ~/wasm-compiler
 cd ~/wasm-compiler
 git clone --depth 1 --single-branch --branch release_40 https://github.com/llvm-mirror/llvm.git
@@ -164,32 +206,39 @@ cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX=.. -DLLVM_TARGETS_TO_BUILD= -DL
 make -j4 install
 ```
 
-Add WASM_LLVM_CONFIG and LLVM_DIR to your .bash_profile:
+Add `WASM_LLVM_CONFIG` and `LLVM_DIR` to your `.bash_profile`:
 
-```commandline
+```bash
 echo "export WASM_LLVM_CONFIG=~/wasm-compiler/llvm/bin/llvm-config" >> ~/.bash_profile
 echo "export LLVM_DIR=/usr/local/Cellar/llvm/4.0.1/lib/cmake/llvm" >> ~/.bash_profile
 source ~/.bash_profile
 ```
 
-## Building and running a node
+<a name="runanode"></a>
+## Building HOTC and running a node 
 
-### Getting the code
+<a name="getcode"></a>
+### Getting the code 
 
-To download all of the code, download Hotc and a recursion or two of submodules. The easiest way to get all of this is to do a recursive clone:
+To download all of the code, download HOTC source code and a recursion or two of submodules. The easiest way to get all of this is to do a recursive clone:
 
-`git clone https://github.com/hotcio/hotc --recursive`
+```bash
+git clone https://github.com/hotcio/hotc --recursive
+```
 
 If a repo is cloned without the `--recursive` flag, the submodules can be retrieved after the fact by running this command from within the repo:
 
-`git submodule update --init --recursive`
+```bash
+git submodule update --init --recursive
+```
 
-### Using the WASM compiler to perform a full build of the project
+<a name="build"></a>
+### Building from source code 
 
-The WASM_LLVM_CONFIG environment variable is used to find our recently built WASM compiler.
-This is needed to compile the example contracts inside hotc/contracts folder and their respective tests.
+The *WASM_LLVM_CONFIG* environment variable is used to find our recently built WASM compiler.
+This is needed to compile the example contracts inside `hotc/contracts` folder and their respective tests.
 
-```commandline
+```bash
 cd ~
 git clone https://github.com/hotcio/hotc --recursive
 mkdir -p ~/hotc/build && cd ~/hotc/build
@@ -212,9 +261,10 @@ HOTC comes with a number of programs you can find in `~/hotc/build/programs`. Th
 * hotc-walletd - HOTC wallet
 * launcher - application for nodes network composing and deployment; [more on launcher](https://github.com/HOTCIO/hotc/blob/master/testnet.md)
 
-### Creating and launching a single-node testnet
+<a name="singlenode"></a>
+### Creating and launching a single-node testnet 
 
-After successfully building the project, the `hotcd` binary should be present in the `programs/hotcd` directory. Go ahead and run `hotcd` -- it will probably exit with an error, but if not, close it immediately with Ctrl-C. Note that `hotcd` created a directory named `data-dir` containing the default configuration (`config.ini`) and some other internals. This default data storage path can be overridden by passing `--data-dir /path/to/data` to `hotcd`.
+After successfully building the project, the `hotcd` binary should be present in the `programs/hotcd` directory. Go ahead and run `hotcd` -- it will probably exit with an error, but if not, close it immediately with <kbd>Ctrl-C</kbd>. Note that `hotcd` created a directory named `data-dir` containing the default configuration (`config.ini`) and some other internals. This default data storage path can be overridden by passing `--data-dir /path/to/data` to `hotcd`.
 
 Edit the `config.ini` file, adding the following settings to the defaults already in place:
 
@@ -254,7 +304,7 @@ plugin = hotc::chain_api_plugin
 plugin = hotc::http_plugin
 ```
 
-Now it should be possible to run `hotcd` and see it begin producing blocks. At present, the P2P code is not implemented, so only single-node configurations are possible. When the P2P networking is implemented, these instructions will be updated to show how to create an example multi-node testnet.
+Now it should be possible to run `hotcd` and see it begin producing blocks.
 
 When running `hotcd` you should get log messages similar to below. It means the blocks are successfully produced.
 
@@ -270,22 +320,25 @@ When running `hotcd` you should get log messages similar to below. It means the 
 1587000ms thread-0   chain_controller.cpp:235      _push_block          ] initf #5 @2017-09-04T04:26:27  | 0 trx, 0 pending, exectime_ms=0
 ```
 
-## Accounts and smart contracts
+<a name="accountssmartcontracts"></a>
+## Accounts and smart contracts 
 
-HOTC comes with example contracts that can be uploaded and run for testing purposes. To upload and test them, please follow the steps below.
+HOTC comes with example contracts that can be uploaded and run for testing purposes. To upload and test them, follow the steps below.
 
-### Example smart contracts
+<a name="smartcontractexample"></a>
+### Example smart contracts 
 
 To publish sample smart contracts you need to create accounts for them.
 
 Run the node:
 
-```commandline
+```bash
 cd ~/hotc/build/programs/hotcd/
 ./hotcd
 ```
 
-### Run hotc-walletd and importing account key
+<a name="walletimport"></a>
+### Setting up a wallet and importing account key 
 
 Before running API commands you need to import the private key of an account you will be authorizing the transactions under into the HOTC wallet.
 
@@ -295,7 +348,7 @@ For testing purposes you can use a pre-created account `inita` from the `genesis
 
 To login you need to run a command importing an active (not owner!) private key from `inita` account (you can find it in `~/hotc/build/programs/hotcd/data-dir/config.ini`) to the wallet.
 
-```commandline
+```bash
 cd ~/hotc/build/programs/hotcc/
 ./hotcc wallet create # Outputs a password that you need to save to be able to lock/unlock the wallet
 ./hotcc wallet import 5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP79zkvFD3
@@ -303,11 +356,12 @@ cd ~/hotc/build/programs/hotcc/
 
 Now you can issue API commands under `inita` authority.
 
-### Create accounts for your smart contracts
+<a name="createaccounts"></a>
+### Creating accounts for your smart contracts 
 
 First, generate public/private key pairs for the `owner_key` and `active_key`. You will need them to create an account:
 
-```commandline
+```bash
 cd ~/hotc/build/programs/hotcc/
 ./hotcc create key
 ./hotcc create key
@@ -320,11 +374,12 @@ Private key: XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 Public key:  XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 ```
 
+**Warning:**
 Save the values for future reference.
 
 Run `create` command where `PUBLIC_KEY_1` and `PUBLIC_KEY_2` are the values generated by the `create key` command:
 
-```commandline
+```bash
 ./hotcc create account inita currency PUBLIC_KEY_1 PUBLIC_KEY_2 
 ```
 
@@ -332,7 +387,7 @@ You should get a json response back with a transaction ID confirming it was exec
 
 Check that account was successfully created: 
 
-```commandline
+```bash
 ./hotcc get account currency
 ```
 
@@ -348,18 +403,19 @@ You should get a response similar to this:
 }
 ```
 
-### Upload sample contract
+<a name="uploadsmartcontract"></a>
+### Upload sample contract to blockchain 
 
 Before uploading a contract, you can verify that there is no current contract:
 
-```commandline
+```bash
 ./hotcc get code currency 
 code hash: 0000000000000000000000000000000000000000000000000000000000000000
 ```
 
 With an account for a contract created, you can upload a sample contract:
 
-```commandline
+```bash
 ./hotcc set contract currency ../../contracts/currency/currency.wast ../../contracts/currency/currency.abi
 ```
 
@@ -367,14 +423,14 @@ As a response you should get a json with a `transaction_id` field. Your contract
 
 You can also verify that the code has been set:
 
-```commandline
+```bash
 ./hotcc get code currency
 code hash: 9b9db1a7940503a88535517049e64467a6e8f4e9e03af15e9968ec89dd794975
 ```
 
 Next you can verify that the currency contract has the proper initial balance:
 
-```commandline
+```bash
 ./hotcc get table currency currency account
 {
   "rows": [{
@@ -386,13 +442,14 @@ Next you can verify that the currency contract has the proper initial balance:
 }
 ```
 
-### Push a message to a sample contract
+<a name="pushamessage"></a>
+### Pushing a message to a sample contract 
 
 To send a message to a contract you need to create a new user account who will be sending the message.
 
 Firstly, generate the keys for the account:
 
-```commandline
+```bash
 cd ~/hotc/build/programs/hotcc/
 ./hotcc create key
 ./hotcc create key
@@ -400,21 +457,23 @@ cd ~/hotc/build/programs/hotcc/
 
 And then create the `tester` account:
 
-```commandline
+```bash
 ./hotcc create account inita tester PUBLIC_USER_KEY_1 PUBLIC_USER_KEY_2 
 ```
 
 After this you can send a message to the contract:
 
-```commandline
+```bash
 ./hotcc push message currency transfer '{"from":"currency","to":"inita","amount":50}' --scope currency,inita --permission currency@active
 ```
 
 As a confirmation of a successfully submitted transaction you will get a json with a `transaction_id` field.
 
-### Reading Currency Contract Balance
+<a name="readingcontract"></a>
+### Reading currency contract balance 
 
-```commandline
+
+```bash
 ./hotcc get table inita currency account
 {
   "rows": [{
@@ -435,23 +494,24 @@ As a confirmation of a successfully submitted transaction you will get a json wi
 }
 ```
 
-## Running local testnet
+<a name="localtestnet"></a>
+## Running local testnet 
 
 To run a local testnet you can use a `launcher` application provided in `~/hotc/build/programs/launcher` folder.
 
 For testing purposes you will run 2 local production nodes talking to each other.
 
-```commandline
+```bash
 cd ~/hotc/build
 cp ../genesis.json ./
-./programs/launcher/launcher -p2 -s testnet.json --skip-signature -l local
+./programs/launcher/launcher -p2 --skip-signature
 ```
 
-This command will generate 2 data folder for each instance of the node: `tn_data_0` and `tn_data_1`, as well as `testnet.json` file for the testnet configuration.
+This command will generate 2 data folders for each instance of the node: `tn_data_0` and `tn_data_1`.
 
 You should see a following response:
 
-```commandline
+```bash
 adding hostname ip-XXX-XXX-XXX
 found interface 127.0.0.1
 found interface XXX.XX.XX.XX
@@ -460,7 +520,7 @@ spawning child, programs/hotcd/hotcd --skip-transaction-signatures --data-dir tn
 ```
 
 To confirm the nodes are running, run following `hotcc` commands:
-```commandline
+```bash
 ~/hotc/build/programs/hotcc
 ./hotcc -p 8888 get info
 ./hotcc -p 8889 get info
@@ -470,17 +530,24 @@ For each you should get a json with a blockchain information.
 
 You can read more on launcher and its settings [here](https://github.com/HOTCIO/hotc/blob/master/testnet.md)
 
-## Run hotc in docker
+<a name="doxygen"></a>
+## Doxygen documentation 
 
-Simple and fast setup of HOTC on Docker is also available. Firstly, install dependencies:
+You can find more detailed API documentation in Doxygen reference: https://hotcio.github.io/hotc/
+
+<a name="docker"></a>
+## Running HOTC in Docker 
+
+Simple and fast setup of HOTC in Docker is also available. Firstly, install dependencies:
 
  - [Docker](https://docs.docker.com)
  - [Docker-compose](https://github.com/docker/compose)
  - [Docker-volumes](https://github.com/cpuguy83/docker-volumes)
 
-Build hotc image
+Build hotc image:
 
-```
+
+```bash
 git clone https://github.com/HOTCIO/hotc.git --recursive
 cd hotc
 cp genesis.json Docker 
@@ -491,7 +558,7 @@ We recommend 6GB+ of memory allocated to Docker to successfully build the image.
 
 Now you can start the Docker container:
 
-```
+```bash
 sudo rm -rf /data/store/hotc # options 
 sudo mkdir -p /data/store/hotc
 docker-compose -f Docker/docker-compose.yml up
@@ -499,14 +566,15 @@ docker-compose -f Docker/docker-compose.yml up
 
 Get chain info:
 
-```
+```bash
 curl http://127.0.0.1:8888/v1/chain/get_info
 ```
 
-### Run contract in docker example
+<a name="dockercontract"></a>
+### Running contract in docker example 
 
 You can run the `hotcc` commands via `docker exec` command. For example:
 
-```
+```bash
 docker exec docker_hotc_1 hotcc contract exchange build/contracts/exchange/exchange.wast build/contracts/exchange/exchange.abi
 ```
