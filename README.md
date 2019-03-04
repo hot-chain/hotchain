@@ -8,8 +8,9 @@ Welcome to the HOTC.IO source code repository!
 
 1. [Getting Started](#gettingstarted)
 2. [Setting up a build/development environment](#setup)
-	1. [Clean install Ubuntu 16.10](#ubuntu)
-	2. [macOS Sierra 10.12.6](#macos)
+	1. [Automated build script](#autobuild)
+	2. [Clean install Ubuntu 16.10](#ubuntu)
+	3. [macOS Sierra 10.12.6](#macos)
 3. [Building HOTC and running a node](#runanode)
 	1. [Getting the code](#getcode)
 	2. [Building from source code](#build)
@@ -43,6 +44,22 @@ Dependencies:
 * LLVM 4.0
 * [secp256k1-zkp (Cryptonomex branch)](https://github.com/cryptonomex/secp256k1-zkp.git)
 * [binaryen](https://github.com/WebAssembly/binaryen.git)
+
+<a name="autobuild"></a>
+### Automated build script
+
+For Ubuntu 16.10 and macOS Sierra, there is an automated build script that can install all dependencies and builds HOTC.
+
+Clone HOTC repository recursively as below and run build.sh located in root `hotc` folder:
+
+```bash
+git clone https://github.com/hotcio/hotc --recursive
+
+cd hotc
+./build.sh ubuntu # For ubuntu 
+./build.sh darwin # For macOS
+```
+
 
 <a name="ubuntu"></a>
 ### Clean install Ubuntu 16.10 
@@ -349,8 +366,8 @@ First, generate public/private key pairs for the `owner_key` and `active_key`. Y
 
 ```bash
 cd ~/hotc/build/programs/hotcc/
-./hotcc create key
-./hotcc create key
+./hotcc create key # owner_key
+./hotcc create key # active_key
 ```
 
 You will get two pairs of a public and private key:
@@ -389,6 +406,12 @@ You should get a response similar to this:
 }
 ```
 
+Now import the owner private key generated previously in the wallet:
+
+```bash
+./hotcc wallet import XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+```
+
 <a name="uploadsmartcontract"></a>
 ### Upload sample contract to blockchain 
 
@@ -397,12 +420,6 @@ Before uploading a contract, you can verify that there is no current contract:
 ```bash
 ./hotcc get code currency 
 code hash: 0000000000000000000000000000000000000000000000000000000000000000
-```
-
-Before you can upload currency contract you need to import its private key that you generated using `create key` command:
-
-```bash
-./hotcc wallet import PRIVATE_KEY_2
 ```
 
 With an account for a contract created, you can upload a sample contract:
