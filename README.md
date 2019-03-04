@@ -1,29 +1,16 @@
-﻿# HOTC.IO - The Most Powerful Infrastructure for Decentralized Applications
+﻿# Hotc
 
 [![Build Status](https://travis-ci.org/HOTCIO/hotc.svg?branch=master)](https://travis-ci.org/HOTCIO/hotc)
 
-Welcome to the HOTC.IO source code repository!  HOTC.IO software enables developers to create and deploy
-high-performance, horizontally scalable, blockchain infrastructure upon which decentralized applications
-can be built. 
-
-This code is currently alpha-quality and under rapid development. That said,
-there is plenty early experimenters can do including, running a private multi-node test network and
-develop applications (smart contracts).  
-
-# Resources
-1. [HOTC.IO Website](https://hotc.io)
-2. [Blog](https://steemit.com/@hotcio)
-2. [Roadmap](https://github.com/HOTCIO/Documentation/blob/master/Roadmap.md)
-3. [Telegram](https://hotc.io/chat)
-4. [Documentation](https://hotcio.github.io/hotc/)
-5. [White Paper](https://github.com/HOTCIO/Documentation/blob/master/TechnicalWhitePaper.md)
+Welcome to the HOTC.IO source code repository!
 
 # Table of contents
 
 1. [Getting Started](#gettingstarted)
 2. [Setting up a build/development environment](#setup)
-	1. [Clean install Ubuntu 16.10](#ubuntu)
-	2. [macOS Sierra 10.12.6](#macos)
+	1. [Automated build script](#autobuild)
+	2. [Clean install Ubuntu 16.10](#ubuntu)
+	3. [macOS Sierra 10.12.6](#macos)
 3. [Building HOTC and running a node](#runanode)
 	1. [Getting the code](#getcode)
 	2. [Building from source code](#build)
@@ -57,6 +44,22 @@ Dependencies:
 * LLVM 4.0
 * [secp256k1-zkp (Cryptonomex branch)](https://github.com/cryptonomex/secp256k1-zkp.git)
 * [binaryen](https://github.com/WebAssembly/binaryen.git)
+
+<a name="autobuild"></a>
+### Automated build script
+
+For Ubuntu 16.10 and macOS Sierra, there is an automated build script that can install all dependencies and builds HOTC.
+
+Clone HOTC repository recursively as below and run build.sh located in root `hotc` folder:
+
+```bash
+git clone https://github.com/hotcio/hotc --recursive
+
+cd hotc
+./build.sh ubuntu # For ubuntu 
+./build.sh darwin # For macOS
+```
+
 
 <a name="ubuntu"></a>
 ### Clean install Ubuntu 16.10 
@@ -504,7 +507,7 @@ For testing purposes you will run 2 local production nodes talking to each other
 ```bash
 cd ~/hotc/build
 cp ../genesis.json ./
-./programs/launcher/launcher -p2 --skip-signature
+./programs/launcher/launcher -p2 --skip-signatures
 ```
 
 This command will generate 2 data folders for each instance of the node: `tn_data_0` and `tn_data_1`.
