@@ -9,8 +9,11 @@ Welcome to the HOTC.IO source code repository!
 1. [Getting Started](#gettingstarted)
 2. [Setting up a build/development environment](#setup)
 	1. [Automated build script](#autobuild)
-	2. [Clean install Ubuntu 16.10](#ubuntu)
-	3. [macOS Sierra 10.12.6](#macos)
+	    1. [Clean install Ubuntu 16.10](#autoubuntu)
+	    2. [macOS Sierra 10.12.6](#automac)
+	2. [Manual installation of the dependencies](#manualdep)
+        1. [Clean install Ubuntu 16.10](#ubuntu)
+        2. [macOS Sierra 10.12.6](#macos)
 3. [Building HOTC and running a node](#runanode)
 	1. [Getting the code](#getcode)
 	2. [Building from source code](#build)
@@ -33,6 +36,51 @@ The following instructions overview the process of getting the software, buildin
 
 <a name="setup"></a>
 ## Setting up a build/development environment
+
+<a name="autobuild"></a>
+### Automated build script
+
+For Ubuntu 16.10 and macOS Sierra, there is an automated build script that can install all dependencies and builds HOTC.
+
+Clone HOTC repository recursively as below and run build.sh located in root `hotc` folder.
+
+<a name="autoubuntu"></a>
+#### Clean install Ubuntu 16.10 
+
+```bash
+git clone https://github.com/hotcio/hotc --recursive
+
+cd hotc
+./build.sh ubuntu # For ubuntu 
+./build.sh darwin # For macOS
+```
+
+Now you can proceed to the next step - [Creating and launching a single-node testnet](#singlenode)
+
+<a name="automac"></a>
+#### macOS Sierra
+
+Before running the script make sure you have updated XCode and brew:
+
+```bash
+xcode-select --install
+ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
+```
+
+```bash
+git clone https://github.com/hotcio/hotc --recursive
+
+cd hotc
+./build.sh darwin
+```
+
+Now you can proceed to the next step - [Creating and launching a single-node testnet](#singlenode)
+
+<a name="manualdep"></a>
+### Manual installation of the dependencies
+
+If you prefer to manually build dependencies - follow the steps below.
+
 This project is written primarily in C++14 and uses CMake as its build system. An up-to-date Clang and the latest version of CMake is recommended.
 
 Dependencies:
@@ -45,24 +93,8 @@ Dependencies:
 * [secp256k1-zkp (Cryptonomex branch)](https://github.com/cryptonomex/secp256k1-zkp.git)
 * [binaryen](https://github.com/WebAssembly/binaryen.git)
 
-<a name="autobuild"></a>
-### Automated build script
-
-For Ubuntu 16.10 and macOS Sierra, there is an automated build script that can install all dependencies and builds HOTC.
-
-Clone HOTC repository recursively as below and run build.sh located in root `hotc` folder:
-
-```bash
-git clone https://github.com/hotcio/hotc --recursive
-
-cd hotc
-./build.sh ubuntu # For ubuntu 
-./build.sh darwin # For macOS
-```
-
-
 <a name="ubuntu"></a>
-### Clean install Ubuntu 16.10 
+#### Clean install Ubuntu 16.10 
 
 Install the development toolkit:
 
@@ -138,7 +170,7 @@ make -j4 install
 Your environment is set up. Now you can <a href="#runanode">build HOTC and run a node</a>. 
 
 <a name="macos"></a>
-### macOS Sierra 10.12.6 
+#### macOS Sierra 10.12.6 
 
 macOS additional Dependencies:
 
