@@ -1,13 +1,13 @@
-/**
-  @defgroup hotccontract hotc contract
-  @brief Documents the interface to the HOTC currency contract
-  @ingroup contracts
 
-  @section hotccontractdesc Description
-*/
 
-namespace native { 
-   
+namespace native {
+  /**
+    @defgroup hotccontract HOTC Contract
+    @brief Documents the interface to the HOTC currency contract
+    @ingroup contracts
+    @{
+  */
+
    /**
     *  @ingroup contracts
     *  @brief Defines the base class for all contracts
@@ -17,47 +17,47 @@ namespace native {
       /**
        *  @brief updates the code that will be executed for this contract
        *
-       *  <h3> Required Authority </h3> 
+       *  <h3> Required Authority </h3>
        *
        *  Requires authority of *this* contract.
        *
-       *  <h3> Required Scope </h3> 
+       *  <h3> Required Scope </h3>
        *
        *  Requires scope of *this* contract.
        *
        *  @note the change in code does not take effect until the start of the next block
        */
       void setcode( Bytes code,
-                    Abi   abi, 
-                    uint8_t vm = 0, 
+                    Abi   abi,
+                    uint8_t vm = 0,
                     uint8_t vm_version = 0 ) final;
 
       /**
        * @brief updates the authority required for a named permission
        *
-       *  <h3> Required Authority </h3> 
+       *  <h3> Required Authority </h3>
        *
        *  Requires authority of *this* contract.
        *
-       *  <h3> Required Scope </h3> 
+       *  <h3> Required Scope </h3>
        *
        *  Requires scope of *this* contract.
        */
       void setauth( Name permission, ///< the name for the permission being set
-                    Name parent, ///< the parent permission to this permission 
+                    Name parent, ///< the parent permission to this permission
                     Authority auth ///< the set of keys/accounts and threshold  );
                    ) final;
-                   
+
 
       /**
        *  @brief set the local named permission required for `this` account/contract to
-       *     call `con::act(...)` 
+       *     call `con::act(...)`
        *
-       *  <h3> Required Authority </h3> 
+       *  <h3> Required Authority </h3>
        *
        *  Requires authority of *this* contract.
        *
-       *  <h3> Required Scope </h3> 
+       *  <h3> Required Scope </h3>
        *
        *  Requires scope of *this* contract.
        *
@@ -69,46 +69,47 @@ namespace native {
        */
       void setperm( Name con, Name act, Name myperm );
    };
-   
+
    /**
     *   @class hotc
-    *
+    *   @brief A *native* currency contract implemented with account named `hotc`
     *   @ingroup contracts
     *
-    *   The HOTC contract is a *native* currency contract implemented with account named `hotc`. This contract enables
-    *   users to transfer HOTC tokens to each other. This contract is designed to work the @ref stakedcontract and 
+    *   @details The HOTC contract is a *native* currency contract implemented with account named `hotc`. This contract enables
+    *   users to transfer HOTC tokens to each other. This contract is designed to work the @ref stakedcontract and
     *   @ref systemcontract when creating new accounts, claiming staked HOTC.
     */
    struct hotc : public contract {
 
       /**
         @brief This action will transfer funds from one account to another.
-        
+
         @pre `from`'s balance must be greaterthan or equal to `amount` transferred.
-        @pre The amount transferred must be greater than 0 
+        @pre The amount transferred must be greater than 0
         @pre `to` and `from` may not be the same account.
-      
+
       <h3> Required Authority </h3>
-      
+
       This action requires the authority of the `from` account.
-      
+
       <h3>Required Scope </h3>
-      
+
       This action requires access to `from` and `to` account scopes. It does not require
       access to the `hotc` scope which means that multiple transfers can execute in parallel
       as long as they don't have any overlapping scopes.
-      
+
       <h3> Required Recipients </h3>
-      
+
       This message requires that the accounts `from` and `to` are listed in the required recipients. This ensures
       other contracts are notified anytime HOTC tokens are transferred.
-      
+
       */
       void transfer (
-         AccountName from,  ///< account from which HOTC will be withdrawn   
+         AccountName from,  ///< account from which HOTC will be withdrawn
          AccountName to,    ///< account to receive HOTC, may not be same as `from`
-         uint64_t    amount ///< must be greater than 0 and less or equal to `from`'s balance 
+         uint64_t    amount ///< must be greater than 0 and less or equal to `from`'s balance
       );
 
  }; /// class HOTC
+ /// @}
 }
