@@ -167,7 +167,9 @@ namespace hotc { namespace chain {
 
    struct PendingInlineTransaction : public types::Transaction {
       typedef types::Transaction super;
-      using super::super;      
+      using super::super;
+
+      explicit PendingInlineTransaction( const types::Transaction& t ):types::Transaction((const types::Transaction& )t){}
       
       typedef InlineTransaction Processed;
    };
@@ -209,7 +211,7 @@ namespace hotc { namespace chain {
       explicit ProcessedGeneratedTransaction( const GeneratedTransaction& t ):id(t.id){}
       ProcessedGeneratedTransaction(){}
 
-      generated_transaction_id_type id;
+      generated_transaction_id_type   id;
       vector<MessageOutput> output;
    };
    /// @} transactions group
