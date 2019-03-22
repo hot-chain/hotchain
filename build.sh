@@ -12,10 +12,6 @@ VERSION=1.0
 WORK_DIR=$PWD
 BUILD_DIR=${WORK_DIR}/build
 TEMP_DIR=/tmp
-BINARYEN_BIN=/opt/binaryen/bin/
-OPENSSL_ROOT_DIR=/usr/local/opt/openssl
-OPENSSL_LIBRARIES=/usr/local/opt/openssl/lib
-WASM_LLVM_CONFIG=/opt/wasm/bin/llvm-config
 
 # Target architectures
 ARCH=$1
@@ -45,6 +41,21 @@ fi
 echo ""
 echo ">>> ARCHITECTURE \"$ARCH\""
 
+if [ $ARCH == "ubuntu" ]; then
+    BOOST_ROOT=${HOME}/opt/boost_1_64_0
+    BINARYEN_BIN=${HOME}/opt/binaryen/bin
+    OPENSSL_ROOT_DIR=/usr/local/opt/openssl
+    OPENSSL_LIBRARIES=/usr/local/opt/openssl/lib
+    WASM_LLVM_CONFIG=${HOME}/opt/wasm/bin/llvm-config
+fi
+
+if [ $ARCH == "darwin" ]; then
+    OPENSSL_ROOT_DIR=/usr/local/opt/openssl
+    OPENSSL_LIBRARIES=/usr/local/opt/openssl/lib
+    BINARYEN_BIN=/usr/local/binaryen/bin/
+    WASM_LLVM_CONFIG=/usr/local/wasm/bin/llvm-config
+fi
+
 # Debug flags
 INSTALL_DEPS=1
 COMPILE_HOTC=1
@@ -56,7 +67,7 @@ CMAKE_BUILD_TYPE=Debug
 # Install dependencies
 if [ ${INSTALL_DEPS} == "1" ]; then
 
-  print ">> Install dependencies"
+  echo ">> Install dependencies"
   . ${WORK_DIR}/scripts/install_dependencies.sh
 
 fi
@@ -64,7 +75,7 @@ fi
 # Create the build dir
 cd ${WORK_DIR}
 mkdir -p ${BUILD_DIR}
-cd ${WORK_DIR}/${BUILD_DIR}
+cd ${BUILD_DIR}
 
 # Build HOTC
 cmake -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DWASM_LLVM_CONFIG=${WASM_LLVM_CONFIG} -DBINARYEN_BIN=${BINARYEN_BIN} -DOPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR} -DOPENSSL_LIBRARIES=${OPENSSL_LIBRARIES} ..
