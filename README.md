@@ -14,7 +14,7 @@ develop applications (smart contracts).
 1. [HOTC.IO Website](https://hotc.io)
 2. [Documentation](https://hotcio.github.io/hotc/)
 3. [Blog](https://steemit.com/@hotcio)
-4. [Community Telegram Group](https://hotc.io/chat)
+4. [Community Telegram Group](https://t.me/HOTCProject)
 5. [Developer Telegram Group](https://t.me/joinchat/EaEnSUPktgfoI-XPfMYtcQ)
 6. [White Paper](https://github.com/HOTCIO/Documentation/blob/master/TechnicalWhitePaper.md)
 7. [Roadmap](https://github.com/HOTCIO/Documentation/blob/master/Roadmap.md)
@@ -26,9 +26,6 @@ develop applications (smart contracts).
 	1. [Automated build script](#autobuild)
 	    1. [Clean install Ubuntu 16.10](#autoubuntu)
 	    2. [MacOS Sierra 10.12.6](#automac)
-	2. [Manual installation of the dependencies](#manualdep)
-      1. [Clean install Ubuntu 16.10](#ubuntu)
-      2. [MacOS Sierra 10.12.6](#macos)
 3. [Building HOTC and running a node](#runanode)
 	1. [Getting the code](#getcode)
 	2. [Building from source code](#build)
@@ -43,6 +40,9 @@ develop applications (smart contracts).
 5. [Running local testnet](#localtestnet)
 6. [Doxygen documentation](#doxygen)
 7. [Running HOTC in Docker](#docker)
+8. [Manual installation of the dependencies](#manualdep)
+   1. [Clean install Ubuntu 16.10](#ubuntu)
+   2. [MacOS Sierra 10.12.6](#macos)
 
 <a name="gettingstarted"></a>
 ## Getting Started
@@ -146,7 +146,7 @@ Edit the `config.ini` file, adding the following settings to the defaults alread
 ```
 # Load the testnet genesis state, which creates some initial block producers with the default key
 genesis-json = /path/to/hotc/source/genesis.json
-# Enable production on a stale chain, since a single-node test chain is pretty much always stale
+ # Enable production on a stale chain, since a single-node test chain is pretty much always stale
 enable-stale-production = true
 # Enable block production with the testnet producers
 producer-name = inita
@@ -191,7 +191,7 @@ When running `hotcd` you should get log messages similar to below. It means the 
 ...
 ```
 
-<a name="accountssmartcontracts"></a>
+<a name="smartcontracts"></a>
 ## Example "Currency" Contract Walkthrough
 
 HOTC comes with example contracts that can be uploaded and run for testing purposes. Next we demonstrate how to upload and interact with the sample contract "currency". 
@@ -345,7 +345,7 @@ will be determined automatically.
 As a confirmation of a successfully submitted transaction you will receive json output that includes a `transaction_id` field.
 
 <a name="readingcontract"></a>
-### Reading sample "currency" contract balance 
+### Reading sample "currency" contract balance
 
 So now check the state of both of the accounts involved in the previous transaction. 
 
@@ -421,7 +421,7 @@ You can find up to date information about HOTC Docker in the [Docker Readme](htt
 
 
 <a name="manualdep"></a>
-### Manual installation of the dependencies
+## Manual installation of the dependencies
 
 If you prefer to manually build dependencies - follow the steps below.
 
@@ -438,7 +438,7 @@ Dependencies:
 * [binaryen](https://github.com/WebAssembly/binaryen.git)
 
 <a name="ubuntu"></a>
-#### Clean install Ubuntu 16.10 
+### Clean install Ubuntu 16.10 
 
 Install the development toolkit:
 
@@ -514,7 +514,7 @@ make -j4 install
 Your environment is set up. Now you can <a href="#runanode">build HOTC and run a node</a>. 
 
 <a name="macos"></a>
-#### MacOS Sierra 10.12.6 
+### MacOS Sierra 10.12.6 
 
 macOS additional Dependencies:
 
